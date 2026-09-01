@@ -1,0 +1,54 @@
+# 協作欄位閘（雲端門）：擋「實作者＝獨立審查者」與五欄沒填齊的 PR。
+#
+# ⚠️ 本檔 2026-09-01 自 teaching-videos repo 移植（該檔又源自理財 webapp）。註解裡的事故編號指的是 webapp 的 PR。
+#    整支搬而不重寫，是因為這些註解每一條都對應一次實際被繞過的事故。
+#    本專案唯一的差異在腳本那側：角色表多一個 **Grok**（本專案 Grok 實作、Codex 複審、Claude 掃描）。
+#
+# ⚠️ **為什麼自己一個檔案**（webapp 那邊是「不併進 ci.yml」，Codex #382 r1 抓到的 High）：
+#   觸發條件不一樣。ci.yml 的三關看的是**程式碼**（commit 一動才需要重跑）；
+#   這道閘看的是**PR 說明**——而 GitHub 的 `pull_request:` 預設事件是
+#   `opened / synchronize / reopened`，**不含 `edited`**。
+#   後果很具體：先用合法五欄開 PR 拿到綠燈 → 再編輯說明把欄位刪掉／把實作者
+#   與審查者改成同一人 → **commit SHA 沒變、workflow 不重跑、綠燈還在**
+#   ⇒ 分支保護照樣放行。反方向也一樣痛：紅燈後補好說明，不會自動轉綠。
+#   所以這裡必須明寫 `types:` 加上 `edited`。
+#   （本 repo 沒有 ci.yml——輕閘只有這一道 check。）
+#
+# ⚠️ job 的 `name:` 是分支保護 required check 的比對字串（**逐字**）。
+#    改這裡就要同步改 GitHub 上的分支保護設定（Settings → Branches → main 的 required checks），
+#    否則 GitHub 會一直等一個永遠不會出現的 check ＝**永遠卡住合併**。
+#    ⚠️ 本 repo 的分支保護設定值記在 `docs/branch-protection.md`（2026-09-01 建立時同步寫下），
+#    但那是一份**人工維護的紀錄**——GitHub 上被改了它不會知道，要以 GitHub 現況為準。
+name: 協作欄位
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  collab-fields:
+    name: 協作欄位（實作者 ≠ 獨立審查者）
+    runs-on: ubuntu-latest
+    # ⚠️ **必須明寫 pull-requests: read**（2026-08-02 第一次上工就踩到）：
+    #    預設的 GITHUB_TOKEN 讀不到 PR 內容，`gh pr view` 會回
+    #    `Resource not accessible by integration (repository.pullRequest)`，
+    #    腳本 fail-closed 判「查不清楚」→ 退出碼 2 → 每一支 PR 都紅。
+    #    （fail-closed 本身是對的：查不到不等於安全。錯的是沒給權限。）
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - name: 協作欄位閘（五欄齊全＋實作者 ≠ 獨立審查者）
+        env:
+          # gh CLI 在 runner 上已預裝；它讀 GH_TOKEN 才查得到 PR 說明
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # ⚠️ 這一行**不可以**接 `|| true`／`; true`，也不可以在 job 上加
+        #    `continue-on-error`——那會讓閘永遠放行，而考題原本看不出來
+        #    （webapp #382 r1 實測：加了 `|| true`，28/28 全綠）。
+        #    ⚠️ **webapp 那邊有考題盯著這件事，本 repo 沒有**（本 repo 不寫自動考題）——
+        #    所以這裡被改壞不會有東西叫，只能靠讀到這段註解的人自己守。
+        run: node scripts/check-pr-collab-fields.js ${{ github.event.pull_request.number }}
