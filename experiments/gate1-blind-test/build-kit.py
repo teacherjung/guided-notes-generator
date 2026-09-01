@@ -7,9 +7,11 @@
 
 run/ 全部不進版控：課本切片是版權素材，組裝出來的提示詞是衍生物（正本在 docs/）。
 
-⚠️ **只取 A–D 四節，不整份餵**：準則檔還有「出處」與「待辦：盲測」兩段，
-   前者點名真筆記是反向工程來源、後者直說這是一場對答案的測驗——
-   讓應試模型看到，它就知道自己在被考、而且有標準答案存在，這會改變它的作答。
+⚠️ **只取 A–D 四節，不整份餵**：準則檔的其餘各節都會洩題——
+   「出處」與「準則的地位」點名真筆記是反向工程來源、且有一份參考組存在；
+   「待辦」直說這是一場盲測、由 William 紅筆評分；
+   「領域相依性標記」則會告訴它哪幾條在哪類教材上會失效（等於先給提示）。
+   讓應試模型看到任何一段，它就知道自己在被考、旁邊還有對照組，這會改變它的作答。
 
 為什麼用 Python 不用 Node：切 PDF 頁需要 PDF 函式庫，本機已有 pypdf，
 而本 repo 刻意沒有 node_modules。一次性腳本不值得為此開依賴。
@@ -99,6 +101,19 @@ def main():
     n_rules = len(re.findall(r"^- \*\*[ABCD]\d", rules, re.M))
     if n_rules < 4:
         die(f"A–D 四節裡只解析出 {n_rules} 條規則，條列格式被改了？")
+    # 領域相依性標記表要蓋滿十八條。表與條文分開放（標記不進提示詞），分開放就會漂移——
+    # 加條規則忘了標，或標記表留著已作廢的條號，都會靜靜地過。
+    mark_sec = re.search(r"^## 領域相依性標記.*?(?=^## 修訂紀錄|\Z)", rules_doc, re.M | re.S)
+    if mark_sec:
+        ids_in_rules = set(re.findall(r"^- \*\*([ABCD]\d)", rules, re.M))
+        table = re.search(r"\|\s*類別\s*\|.*?(?=\n\n)", mark_sec.group(0), re.S)
+        marked = set(re.findall(r"[ABCD]\d", table.group(0))) if table else set()
+        if marked != ids_in_rules:
+            die("領域相依性標記表與條文對不上："
+                f"只在條文有 {sorted(ids_in_rules - marked)}；只在標記表有 {sorted(marked - ids_in_rules)}")
+    else:
+        die("準則檔找不到「## 領域相依性標記」節——被刪了？")
+
     template = (HERE / "prompt-template.md").read_text(encoding="utf-8")
     slot = "{{" + "BLANKING_RULES" + "}}"   # 拆開寫：這支腳本自己也不該出現插槽字面
     # ⚠️ 插槽必須剛好一個。實測踩過：模板頂端的註解裡也寫了插槽字面，
