@@ -25,7 +25,7 @@
 |---|---|
 | 日期 | ____ |
 | 應試模型與版本 | ____ |
-| 準則版本（貼入 `run/blanking-rules.txt` 的時間） | ____ |
+| 準則版本（抄 `run/kit-manifest.txt`：準則 hash ＋ repo HEAD） | ____ |
 | 課本範圍 | PDF 第 24–28 頁（書頁 1021–1025，15.4 正文與例題；習題頁未納入） |
 | 對照的真筆記 | `CH15 (T).pdf` / `Calc_07 (S).pdf` 的 15.4 段 |
 | 機械檢查（`check-output.py`） | 一次過關／退回 ____ 次 |
@@ -106,8 +106,9 @@
 |---|---|---|---|
 | 1 | | | |
 
-⚠️ **這些條文由 William 改在 Notion 正本**。本 repo 不留準則副本、不代改（CLAUDE.md 鐵則 2）。
-改完後，`run/blanking-rules.txt` 重貼、重跑一次，記為第 ____ 輪。
+⚠️ 條文改在 `docs/blanking-rules.md` 並走 PR——**改準則＝改演算法**（CLAUDE.md 鐵則 6），
+驗收要附前後輪的數字比較。條號 A1–D3 不可重編，新增往後接。
+改完重跑 `build-kit.py`，記為第 ____ 輪（`kit-manifest.txt` 的準則 hash 會跟著變，兩輪才對得起來）。
 
 ---
 
