@@ -43,6 +43,17 @@ import { gitEnv } from '../lib/git-env.js';
  */
 export const MERGE_GATE = { name: '協作欄位', why: 'PR 說明五欄齊全且實作者 ≠ 獨立審查者' };
 
+/**
+ * 行尾正規化：\r\n、裸 \r、U+2028、U+2029、U+0085 一律折成 \n（r5 High②）。
+ * 不折的話：regex 的 m-flag 把 U+2028 當行尾（值抓得乾淨），split('\n') 卻不切它——
+ * 兩套「行」的定義不一致，黏在 U+2028 後面的內容就從掃描縫隙溜過去。
+ * 所有讀 body 的函式一律先過這裡，讓全檔只有一種「行」。
+ * @param {string} s @returns {string}
+ */
+export function normalizeEols(s) {
+  return String(s || '').replace(/\r\n?|[\u2028\u2029\u0085]/g, '\n');
+}
+
 /** 五個必填欄位。**這份清單是單一真相**——`.github/pull_request_template.md` 照它。 */
 export const REQUIRED_FIELDS = [
   '實作者',
@@ -69,7 +80,7 @@ export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
  * @param {string} body @param {string} field @returns {string}
  */
 export function fieldValue(body, field) {
-  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
+  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
   // 形如：`- **實作者**：Claude` ／ `**實作者**: Claude` ／ `實作者：Claude`
   // ⚠️ 冒號後只准吃**水平空白**（`[^\\S\\n]`），不可用 `\\s`——`\\s` 會吃掉換行，
   //    於是「欄位留空」會抓到**下一行**的內容，空模板看起來像「每一欄都填了」。
@@ -93,7 +104,7 @@ export function fieldValue(body, field) {
  * @param {string} body @param {string} field @returns {number}
  */
 export function fieldCount(body, field) {
-  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
+  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
   const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`, 'gm');
   return (clean.match(re) || []).length;
@@ -147,36 +158,36 @@ export function canonicalRole(raw) {
 }
 
 /**
- * 角色欄（實作者／獨立審查者）**不得有續行**（r4 關門）。
+ * 協作欄位**五欄必須是連續五行、依模板順序**（r5 定案的白名單關門）。
  *
- * r3 關掉了「同一行裡的加註」，r4 實測繞過：欄位本行填乾淨的 `Claude`，
- * **下一行**寫「（Codex 也有動）」——markdown 的清單續行（含 lazy continuation：
- * 縮排與頂格都算）會把它渲染進同一個清單項，人看到的是加註、機器只讀一行。
- * 規則：角色欄位行之後，直到空行／下一個清單項／標題之前，出現任何非空行＝擋。
- * 只管兩個角色欄——自由文字欄（如「最糟失去什麼」）寫多行是正常需求，攻擊面不在那裡
- * （自審藏在自由欄裡騙不過閘：閘比對的角色只從角色欄讀）。
+ * 沿革——這是「角色欄加註」這個洞的第六種修法，前五種全是黑名單、全被實測繞過：
+ * 同行括號（r1 前）→ 分隔符拆字（r1）→ HTML entity／標籤（r2–r3）→ 清單續行（r4）→
+ * 空行段落／巢狀子清單／U+2028 行分隔（r5）。markdown「什麼會被渲染進同一格」的語意
+ * 是列舉不完的，判斷「什麼算續行」就是在重寫 renderer。
+ * 白名單反過來：不判斷壞東西長什麼樣，要求好東西只有一種形狀——五欄連續五行、
+ * 順序照模板、行間零容忍。任何黏進來的內容都會讓「下一行不是預期欄位」而報錯。
+ * 第五欄（自由文字）之後的行不管：閘不從那裡讀任何判定，多行說明是正常需求。
  *
  * @param {string} body @returns {string[]}
  */
-export function roleFieldContinuationProblems(body) {
-  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
-  /** @type {string[]} */ const problems = [];
-  for (const field of ['實作者', '獨立審查者']) {
+export function fieldBlockShapeProblems(body) {
+  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
+  const lines = clean.split('\n');
+  const fieldRe = (field) => {
     const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：].*$`, 'm');
-    const m = clean.match(re);
-    if (!m || m.index === undefined) continue;
-    const lines = clean.slice(m.index + m[0].length).split('\n').slice(1);
-    for (const line of lines) {
-      if (!line.trim()) break;                                             // 空行＝清單項結束
-      if (/^[^\S\n]*(?:[-*+]|\d+[.)])[^\S\n]+/.test(line)) break;     // 下一個清單項
-      if (/^#{1,6}\s/.test(line)) break;                                  // 標題
-      problems.push(`「${field}」欄位下面有續行「${line.trim().slice(0, 40)}」`
-        + '——角色欄不得有任何續行（GitHub 會把它渲染進同一格，等於加註）。');
-      break;
+    return new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`);
+  };
+  const idx = lines.findIndex((l) => fieldRe(REQUIRED_FIELDS[0]).test(l));
+  if (idx === -1) return [];   // 第一欄整個缺＝由「缺欄」檢查去報，這裡不重複
+  for (let k = 1; k < REQUIRED_FIELDS.length; k++) {
+    const line = lines[idx + k];
+    if (line === undefined || !fieldRe(REQUIRED_FIELDS[k]).test(line)) {
+      return [`協作欄位五欄必須是**連續五行**、依模板順序。第 ${k + 1} 行應為「${REQUIRED_FIELDS[k]}」，`
+        + `實得「${(line ?? '（沒有了）').trim().slice(0, 40)}」——`
+        + '欄位行之間不得有任何續行、空行或其他內容（照 .github/pull_request_template.md 的形狀填）。'];
     }
   }
-  return problems;
+  return [];
 }
 
 /**
@@ -184,7 +195,7 @@ export function roleFieldContinuationProblems(body) {
  * @param {string} body @returns {string[]}
  */
 export function problemsOf(body) {
-  /** @type {string[]} */ const problems = [...roleFieldContinuationProblems(body)];
+  /** @type {string[]} */ const problems = [...fieldBlockShapeProblems(body)];
   /** @type {Record<string,string>} */ const got = {};
   for (const f of REQUIRED_FIELDS) {
     const n = fieldCount(body, f);
