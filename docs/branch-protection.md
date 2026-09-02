@@ -22,7 +22,7 @@
    ! [remote rejected] claude/branch-protection-doc -> main (protected branch hook declined)
   ```
   （2026-09-01 首測同結果；當時寫「見下方輸出」卻沒貼——引用要兌現，Codex r1 Low 抓到。）
-- 2026-09-01：協作欄位閘離線探針 `experiments/gate-probe.mjs` → 五案例四擋一放行。
+- 協作欄位閘離線探針 `experiments/gate-probe.mjs` → 該擋的全擋、該放的照放（案例數刻意不寫死——每輪審查抓到的繞法都會轉成常設案例，寫死的數字自己會漂；以跑一次的輸出為準）。
 
 ## 重設方式
 

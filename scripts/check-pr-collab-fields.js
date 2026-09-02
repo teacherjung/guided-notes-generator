@@ -53,8 +53,10 @@ export const REQUIRED_FIELDS = [
 ];
 
 /** 合法的角色名（實作者／審查者只能是這三個之一）。 */
-// ⚠️ 本專案（guided-notes-generator）的分工與 webapp／影片線不同：**Grok 實作、Codex 複審、Claude 最終掃描**，
-//    所以角色表多一個 Grok。改這份清單＝改這道閘認得誰，PR 模板的填寫說明要同步。
+// ⚠️ 角色表比 webapp 多一個 Grok（本專案把它列為合法角色）。分工現況見 CLAUDE.md「分工」節——
+//    閘只守「實作者≠審查者」這條不變量、不記分工順序，分工變動不需要動這份清單（r2 之前這裡
+//    抄了一份分工順序，分工一改就變成過期複本——會漂的不是規則，是複本）。
+//    改這份清單＝改這道閘認得誰，PR 模板的填寫說明要同步。
 export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
 
 /**
@@ -142,18 +144,18 @@ export function canonicalRole(raw) {
       if (/\p{L}/u.test(ch) && !/\p{Script=Latin}/u.test(ch) && !/\p{Script=Han}/u.test(ch)) return null;
     }
   }
-  // **括號裡若藏著第二個角色就不算單一角色**（Codex #379 r2 Medium①）：
-  //   「Claude（Codex）」剝掉括號會變成乾淨的 `Claude`，與「獨立審查者：Codex」搭配就整份通過——
-  //   但那個欄位實際上提到了兩個角色，語意上正是「看不出是誰」。
-  for (const inner of bare.match(/\([^)]*\)/g) || []) {
-    // bare 已經過 probeNormalize——括號內的藏字元在這之前就被折掉了（r4 的四個重現都在這裡歸位）
-    // ⚠️ 掃之前先拔掉空白與常見分隔符（本 repo r1 High①）：`Claude（Co dex 也有動）`——
-    //    「Co dex」中間一個普通空格就讓 /Codex/i 掃不中，括號整段被剝掉後剩乾淨的 Claude。
-    //    劃界照舊：這裡擋的是分隔符藏法；語意上完全改寫的描述（「另一位也有動」）不是機器能懂的，
-    //    那一層靠審查者讀 PR，不靠這支。
-    const innerFlat = inner.replace(/[\s\-_.]+/g, '');
-    if (ROLES.some((r) => new RegExp(r, 'i').test(innerFlat))) return null;
-  }
+  // **整欄拔掉所有非字母數字後，出現超過一個角色名＝看不出是誰**（本 repo r1 High①→r2 High①）。
+  //   演進記錄，這一格是列舉病的標本：
+  //   r1 前：括號內直接掃角色 →「Co dex」一個空格就穿過。
+  //   r1 修：拔掉空白與 `-_.` 再掃 → r2 實測 `Co/dex`、全形斜線、`（Co）（dex）` 照樣穿過——
+  //   分隔符列舉補不完，跨括號拆字更是列舉不到。
+  //   r2 關門：不列舉分隔符了——把**整欄**（含括號內容）的非字母數字全部拔掉，
+  //   在剩下的字母流裡數 distinct 角色名。任何用「插字元」「拆段」藏第二個角色的寫法，
+  //   拔完都會重新黏回角色名本身。（webapp 認過的病型：列舉繞法補不完就要關門。）
+  //   劃界照舊：語意改寫的描述（「另一位也有動」，不點名）機器不懂，那層靠審查者讀 PR。
+  const flat = bare.replace(/[^\p{L}\p{N}]+/gu, '');
+  const rolesFound = ROLES.filter((r) => new RegExp(r, 'i').test(flat));
+  if (rolesFound.length > 1) return null;
   const t = bare
     .replace(/\([^)]*\)/g, '')                 // 括號註記（「Claude（已看過）」；NFKC 後全形括號已折成半形）
     .replace(/\s+/g, '')                        // 空白
