@@ -25,7 +25,12 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 RUN = HERE / "run"
-TEXTBOOK = Path.home() / "Desktop" / "Multivariable Calculus (7E)pdf.pdf"
+# 素材 2026-09-02 從 Desktop 收進「引導式筆記」資料夾；找不到時列出兩個候選位置再死
+_CANDIDATES = [
+    Path.home() / "Desktop" / "引導式筆記" / "Multivariable Calculus (7E)pdf.pdf",
+    Path.home() / "Desktop" / "Multivariable Calculus (7E)pdf.pdf",
+]
+TEXTBOOK = next((p for p in _CANDIDATES if p.exists()), _CANDIDATES[0])
 RULES = HERE.parent.parent / "docs" / "blanking-rules.md"
 
 # 1-based 頁碼。README 的對照表是這裡的正本，改一邊要改兩邊。

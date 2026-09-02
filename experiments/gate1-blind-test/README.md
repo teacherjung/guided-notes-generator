@@ -7,7 +7,9 @@
 1. **準則問題**：挖空準則 v1 寫得夠不夠清楚，讓一個沒教過這門課的模型能照著做出
    **William 認可**的挖空？（真筆記是參考組，用來對照與找靈感；判準是他對產出的期待，
    不是與舊筆記的一致度——2026-09-01 更正。）
-2. **人事問題**：Grok 能不能當本專案的實作者？（PLAN.md 閘門 1 註明：這同時是 Grok 的試鏡）
+2. **執行問題**：準則寫清楚了，執行的模型照不照得住？
+   （⚠️ 2026-09-02 分工已改：Claude 實作、Grok 只做複審後掃。這一題**不再是誰的試鏡**，
+   它只回答「換個執行模型會不會更好」，不連動分工。）
 
 ## 盲性規則（這套東西唯一的價值來源）
 
@@ -35,10 +37,10 @@
 
 | 檔 | 位置 | 進版控？ |
 |---|---|---|
-| Stewart 課本（74 頁節錄） | `~/Desktop/Multivariable Calculus (7E)pdf.pdf` | 否 |
+| Stewart 課本（74 頁節錄） | `~/Desktop/引導式筆記/Multivariable Calculus (7E)pdf.pdf` | 否 |
 | 切出來的 15.4 頁（本套件產物） | `run/`（gitignore） | **否** |
 | 挖空準則正本 | `docs/blanking-rules.md` | **是**（2026-09-01 William 改判：準則會邊做邊調，要有 diff 與審查閘） |
-| 真筆記 T/S 版 | `~/Desktop/CH15 (T).pdf`、`Calc_07 (S).pdf` | 否 |
+| 真筆記 T/S 版 | `~/Desktop/引導式筆記/CH15 (T).pdf`、`Calc_07 (S).pdf` | 否 |
 
 版權紅線（PLAN.md 五之一）：這些切片只給 William 個人評測用，不散布、不進 repo。
 
@@ -87,7 +89,7 @@ python3 experiments/gate1-blind-test/check-output.py
    盲訂出來的不是門檻是亂數。
    ⚠️ **1-A 全部判完之前不可以打開參考組**（`CH15 (T).pdf` / `Calc_07 (S).pdf`）。
    1-B 要靠 1-A 的判定當存證，才分得開「AI 判錯」與「參考組當年寫得鬆」。
-5. 判定寫回 PLAN.md 閘門表（通過／不通過），Grok 試鏡結論寫回 CLAUDE.md 分工節；
+5. 判定寫回 PLAN.md 閘門表（通過／不通過）；
    準則要補的條文，改在 `docs/blanking-rules.md` 並走 PR（**改準則＝改演算法**，CLAUDE.md 鐵則 6）；
    條號 A1–D3 是穩定 ID 不可重編，新增的往後接。
 
@@ -103,7 +105,7 @@ python3 experiments/gate1-blind-test/check-output.py
 | `prompt-template.md` | 考題模板。準則正文不寫死在裡面，留一個插槽由組裝時填 |
 | `build-kit.py` | 切課本頁 ＋ 填準則 → `run/`。頁碼有自檢；剝註解、掃禁詞，換版或洩題會大聲死掉 |
 | `check-output.py` | 機械檢查 Grok 的輸出（同構、編號、比例）。已用壞掉的樣本實測會叫 |
-| `grading-sheet.md` | William 的紅筆評分表（準則的成績／Grok 的試鏡／準則要不要改，三段分開） |
+| `grading-sheet.md` | William 的紅筆評分表（準則的成績／執行者的表現／準則要不要改，三段分開） |
 | `run/` | 全部產物與素材，**不進版控** |
 
 ## 為什麼輸入是 PDF 頁而不是抽出來的純文字
