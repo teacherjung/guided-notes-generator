@@ -120,49 +120,30 @@ export function probeNormalize(v) {
 }
 
 /**
- * 把欄位值正規化成**剛好一個**角色；看不出來或不只一個就回 `null`。
+ * 把欄位值正規化成**剛好一個**角色；對不上就回 `null`。
  *
- * ⚠️ 這裡刻意**不用 `includes`**（Codex #379 r1 High①）：`NotClaude` 含有 `Claude`、
- *    `Claude and Codex` 也含有 `Claude`——用 substring 判斷等於把 fail-open 寫進閘裡。
- *    先剝掉 markdown 粗體、反引號、括號註記與空白，再要求**全等**於某一個角色。
+ * ⚠️ **嚴格模式（r3 定案）**：剝掉 markdown 粗體／斜體裝飾與頭尾空白後，
+ *    值必須**精確等於**某一個角色名（大小寫不計）。**不接受任何加註**——括號、斜線、
+ *    描述文字，一律「看不出是誰」。
+ *
+ *    這是三輪審查打同一個洞之後的關門。演進全記在這裡，因為每一步都是實測繞過：
+ *    r1 前：括號內掃角色 →「Co dex」一個空格穿過。
+ *    r1：拔空白與 `-_.` 再掃 → `Co/dex`、全形斜線、`（Co）（dex）` 穿過（分隔符列舉不完）。
+ *    r2：整欄拔掉非字母數字、數 distinct 角色 → `Co&#100;ex`、`Co<em>d</em>ex` 穿過——
+ *        機器掃的是 markdown 原始碼，人看的是渲染結果，**兩層永遠可以不一樣**，
+ *        而渲染語意（HTML entity、標籤、連結……）又是一個列舉不完的空間。
+ *    r3 關門：**把加註空間整個關掉**。攻擊面是「加註裡可以藏東西」，那就不給加註。
+ *    「Claude（已看過）」這類無害寫法一併被拒是刻意的代價——說明寫 PR 描述別處，
+ *    錯誤訊息會講清楚怎麼改。模板填寫說明本來就寫「不接受加註」，閘從此真的執行它。
  *
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
-  // ⚠️ **正規化要做在最前面、只做一次**（Codex #379 r3 Medium）：
-  //    r2 版只把外層正規化、括號內的檢查用原字串，於是 `Claude（Ｃｏｄｅｘ）`（全形）與
-  //    `Claude（Co\u200bdex）`（零寬）都溜過去——括號被整段剝掉，剩下乾淨的 `Claude`。
-  //    根因是「同一個字串有兩種形式在流動」。**之後所有判斷都只看正規化後的字串**。
   const bare = probeNormalize(String(raw || ''))
-    .replace(/[`*_~]/g, '');                    // markdown 裝飾
-  // ⚠️ **混用文字系統＝看不出是誰，fail-closed**（Codex #379 r4 Medium）：
-  //    西里爾 `С`（U+0421）跟拉丁 `C` 在螢幕上長一樣，正規化折不掉——那是**不同的字母**。
-  //    角色名全是拉丁字母；欄位裡出現「拉丁以外的字母混在拉丁詞裡」沒有任何正當理由，
-  //    整欄直接判「看不出是誰」。不做 confusable 對照表（表列不完，同型病第四次）。
-  if (/\p{Script=Latin}/u.test(bare)) {
-    for (const ch of bare) {
-      if (/\p{L}/u.test(ch) && !/\p{Script=Latin}/u.test(ch) && !/\p{Script=Han}/u.test(ch)) return null;
-    }
-  }
-  // **整欄拔掉所有非字母數字後，出現超過一個角色名＝看不出是誰**（本 repo r1 High①→r2 High①）。
-  //   演進記錄，這一格是列舉病的標本：
-  //   r1 前：括號內直接掃角色 →「Co dex」一個空格就穿過。
-  //   r1 修：拔掉空白與 `-_.` 再掃 → r2 實測 `Co/dex`、全形斜線、`（Co）（dex）` 照樣穿過——
-  //   分隔符列舉補不完，跨括號拆字更是列舉不到。
-  //   r2 關門：不列舉分隔符了——把**整欄**（含括號內容）的非字母數字全部拔掉，
-  //   在剩下的字母流裡數 distinct 角色名。任何用「插字元」「拆段」藏第二個角色的寫法，
-  //   拔完都會重新黏回角色名本身。（webapp 認過的病型：列舉繞法補不完就要關門。）
-  //   劃界照舊：語意改寫的描述（「另一位也有動」，不點名）機器不懂，那層靠審查者讀 PR。
-  const flat = bare.replace(/[^\p{L}\p{N}]+/gu, '');
-  const rolesFound = ROLES.filter((r) => new RegExp(r, 'i').test(flat));
-  if (rolesFound.length > 1) return null;
-  const t = bare
-    .replace(/\([^)]*\)/g, '')                 // 括號註記（「Claude（已看過）」；NFKC 後全形括號已折成半形）
-    .replace(/\s+/g, '')                        // 空白
+    .replace(/[`*_~]/g, '')                     // markdown 粗體／斜體／刪除線裝飾
     .trim();
-  if (!t) return null;
-  const hit = ROLES.filter((r) => r.toLowerCase() === t.toLowerCase());
-  return hit.length === 1 ? hit[0] : null;      // 不只一個或零個 → 看不出來
+  const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
+  return hit.length === 1 ? hit[0] : null;
 }
 
 /**
@@ -195,8 +176,8 @@ export function problemsOf(body) {
   //    現在：剝掉格式與裝飾字之後**必須剛好命中一個角色**，然後比對正規化後的角色。
   for (const [label, raw, role] of [['實作者', implRaw, impl], ['獨立審查者', revRaw, rev]]) {
     if (raw && !role) {
-      problems.push(`「${label}」寫成「${raw}」，必須剛好是 ${ROLES.join('／')} 的其中一個`
-        + '（不接受加註、多人並列、或看不出是誰的寫法）');
+      problems.push(`「${label}」寫成「${raw}」，必須**恰好等於** ${ROLES.join('／')} 的其中一個`
+        + '——不接受任何加註（括號、描述文字都不行；說明請寫在 PR 描述其他地方）');
     }
   }
   // 核心那一條：實作者 ≠ 審查者。寫成同一個人＝違反唯一不變量，這道閘存在的全部理由。
