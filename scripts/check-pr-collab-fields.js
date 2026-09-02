@@ -211,8 +211,29 @@ export function fieldBlockShapeProblems(body) {
     const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`);
   };
-  const idx = lines.findIndex((l) => fieldRe(REQUIRED_FIELDS[0]).test(l));
-  if (idx === -1) return [];   // 第一欄整個缺＝由「缺欄」檢查去報，這裡不重複
+  // **五欄必須在說明的最前面**（r7 定案的第二道白名單）。
+  // r6–r7 的旁路（fenced code、跨行 code span、fence 長度細節、清單容器、raw HTML <pre>）
+  // 有一個共同前提：五欄**前面**可以放任意內容——語境開啟符都是放在前面才生效的。
+  // 與其把 GFM 的語境規則一條條搬進來（跨行 span、fence 長度、closing 尾端限制……
+  // 每一條都是 spec 的真實細節，手寫模擬就是在重寫 renderer），直接拿掉那個前提：
+  // 剝註解、遮蔽之後，第一個實質行只能是「## 協作欄位」標題或第一欄本身，
+  // 五欄之前沒有任何餘地放語境開啟符。被遮蔽的行（\x00）也算不合法前導——
+  // code 區塊擋在五欄前面同樣改變語境，一樣擋。
+  let firstIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (!l.trim()) continue;                                    // 空行可略過
+    if (/^#{1,6}[^\S\n]*協作欄位/.test(l)) continue;          // 區塊標題可略過
+    firstIdx = i;
+    break;
+  }
+  if (firstIdx === -1) return [];  // 整份空＝由「缺欄」檢查去報
+  if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
+    return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
+      + `實際的第一行是「${lines[firstIdx].trim().slice(0, 40).replace(/\x00/g, '（程式碼區塊）')}」`
+      + '——請照 .github/pull_request_template.md 的順序：五欄在最上、說明寫在五欄之後。'];
+  }
+  const idx = firstIdx;
   for (let k = 1; k < REQUIRED_FIELDS.length; k++) {
     const line = lines[idx + k];
     if (line === undefined || !fieldRe(REQUIRED_FIELDS[k]).test(line)) {
