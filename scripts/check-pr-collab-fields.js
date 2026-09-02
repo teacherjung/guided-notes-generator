@@ -54,6 +54,37 @@ export function normalizeEols(s) {
   return String(s || '').replace(/\r\n?|[\u2028\u2029\u0085]/g, '\n');
 }
 
+/**
+ * 統一的前處理管線（r6 定案）：行尾正規化 → **遮蔽程式碼區塊與行內 code** → 剝 HTML 註解。
+ *
+ * 為什麼要遮蔽（Codex r6 兩條 High）：
+ * ①五欄整份放進 fenced code block 或縮排四格——GitHub 渲染成**程式碼範例**，
+ *   不是正式欄位，但逐行掃描照樣命中＝範例滿足了 required check。
+ * ②行內 code 裡的 `<!-- -->` 在渲染上**看得見**，全域剝註解卻把它當隱形註解刪掉——
+ *   「讀者看得到的加註」被機器當不存在。
+ * 兩條的共同根因：剝註解／掃欄位發生在理解 markdown 語境之前。修法＝先把 code 語境
+ * 整塊換成佔位字元（\x00），再做其他處理——佔位行不可能匹配欄位，也不可能是註解邊界。
+ * 縮排 code 的判定從寬（行首 ≥4 空白即遮）：正常模板五欄零縮排，手動縮排四格填欄位
+ * 會被形狀檢查退回並指路模板，是可接受的代價。
+ *
+ * @param {string} body @returns {string}
+ */
+export function cleanBody(body) {
+  const lines = normalizeEols(body).split('\n');
+  let fence = '';   // 目前所在的圍欄記號（'`' 或 '~'），空字串＝不在圍欄裡
+  const masked = lines.map((line) => {
+    const open = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      if (open && open[1][0] === fence) fence = '';
+      return '\x00';
+    }
+    if (open) { fence = open[1][0]; return '\x00'; }
+    if (/^(?: {4,}|\t)/.test(line)) return '\x00';          // 縮排 code
+    return line.replace(/`[^`\n]*`/g, '\x00');              // 行內 code span
+  }).join('\n');
+  return masked.replace(/<!--[\s\S]*?-->/g, '');
+}
+
 /** 五個必填欄位。**這份清單是單一真相**——`.github/pull_request_template.md` 照它。 */
 export const REQUIRED_FIELDS = [
   '實作者',
@@ -80,7 +111,7 @@ export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
  * @param {string} body @param {string} field @returns {string}
  */
 export function fieldValue(body, field) {
-  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
+  const clean = cleanBody(body);
   // 形如：`- **實作者**：Claude` ／ `**實作者**: Claude` ／ `實作者：Claude`
   // ⚠️ 冒號後只准吃**水平空白**（`[^\\S\\n]`），不可用 `\\s`——`\\s` 會吃掉換行，
   //    於是「欄位留空」會抓到**下一行**的內容，空模板看起來像「每一欄都填了」。
@@ -104,7 +135,7 @@ export function fieldValue(body, field) {
  * @param {string} body @param {string} field @returns {number}
  */
 export function fieldCount(body, field) {
-  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
+  const clean = cleanBody(body);
   const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`, 'gm');
   return (clean.match(re) || []).length;
@@ -150,8 +181,11 @@ export function probeNormalize(v) {
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
+  // 只剝粗斜體裝飾（`**Claude**` 是常見合理寫法）。反引號、波浪號**不剝**（r6 High②）：
+  // 行內 code 是加註的藏身處（`` `<!-- … -->` `` 在渲染上看得見），值裡出現就直接不等於角色名。
+  // cleanBody 已把 code span 換成佔位字元 \x00，留在值裡同樣使比對失敗——兩層都兜。
   const bare = probeNormalize(String(raw || ''))
-    .replace(/[`*_~]/g, '')                     // markdown 粗體／斜體／刪除線裝飾
+    .replace(/[*_]/g, '')
     .trim();
   const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
   return hit.length === 1 ? hit[0] : null;
@@ -171,7 +205,7 @@ export function canonicalRole(raw) {
  * @param {string} body @returns {string[]}
  */
 export function fieldBlockShapeProblems(body) {
-  const clean = normalizeEols(body).replace(/<!--[\s\S]*?-->/g, '');
+  const clean = cleanBody(body);
   const lines = clean.split('\n');
   const fieldRe = (field) => {
     const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
