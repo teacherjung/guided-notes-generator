@@ -223,7 +223,9 @@ export function fieldBlockShapeProblems(body) {
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     if (!l.trim()) continue;                                    // 空行可略過
-    if (/^#{1,6}[^\S\n]*協作欄位/.test(l)) continue;          // 區塊標題可略過
+    // 標題例外必須**整行精確匹配**（r8）：`##協作欄位 <details>` 既不是合法 ATX 標題
+    // （# 後要有空白），行尾又帶著語境開啟符——只匹配前綴會把它當標題放過。
+    if (/^#{1,6}[ \t]+協作欄位[ \t]*$/.test(l)) continue;
     firstIdx = i;
     break;
   }
@@ -234,12 +236,26 @@ export function fieldBlockShapeProblems(body) {
       + '——請照 .github/pull_request_template.md 的順序：五欄在最上、說明寫在五欄之後。'];
   }
   const idx = firstIdx;
-  for (let k = 1; k < REQUIRED_FIELDS.length; k++) {
+  for (let k = 0; k < REQUIRED_FIELDS.length; k++) {
     const line = lines[idx + k];
     if (line === undefined || !fieldRe(REQUIRED_FIELDS[k]).test(line)) {
       return [`協作欄位五欄必須是**連續五行**、依模板順序。第 ${k + 1} 行應為「${REQUIRED_FIELDS[k]}」，`
         + `實得「${(line ?? '（沒有了）').trim().slice(0, 40)}」——`
         + '欄位行之間不得有任何續行、空行或其他內容（照 .github/pull_request_template.md 的形狀填）。'];
+    }
+    // 每一欄都必須是**獨立的清單項**（r8）：沒有清單標記的五行會合成同一個 paragraph，
+    // 值尾的語境開啟符就能吞掉後面的欄位行。
+    if (!/^[^\S\n]*(?:[-*+]|\d+[.)])[^\S\n]/.test(line)) {
+      return [`「${REQUIRED_FIELDS[k]}」那一行沒有清單標記——五欄每行都要以「- 」開頭`
+        + '（照模板），否則五行會被渲染成同一個段落。'];
+    }
+    // 欄位行內禁止語境開啟符（r8 關門）：`<` 開 raw HTML、反引號開（跨行）code span、
+    // \x00 是遮蔽產物＝行裡原本有 code。值需要寫這些符號時，寫在五欄之後的說明區。
+    const banned = line.match(/[<`\x00]/);
+    if (banned) {
+      return [`「${REQUIRED_FIELDS[k]}」那一行含「${banned[0] === '\x00' ? '程式碼片段' : banned[0]}」`
+        + '——五欄行內不得出現 `<`、反引號或程式碼片段（它們會改變後續欄位的渲染語境）。'
+        + '需要這些符號的內容寫在五欄之後的說明區。'];
     }
   }
   return [];
