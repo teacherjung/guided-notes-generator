@@ -147,11 +147,44 @@ export function canonicalRole(raw) {
 }
 
 /**
+ * 角色欄（實作者／獨立審查者）**不得有續行**（r4 關門）。
+ *
+ * r3 關掉了「同一行裡的加註」，r4 實測繞過：欄位本行填乾淨的 `Claude`，
+ * **下一行**寫「（Codex 也有動）」——markdown 的清單續行（含 lazy continuation：
+ * 縮排與頂格都算）會把它渲染進同一個清單項，人看到的是加註、機器只讀一行。
+ * 規則：角色欄位行之後，直到空行／下一個清單項／標題之前，出現任何非空行＝擋。
+ * 只管兩個角色欄——自由文字欄（如「最糟失去什麼」）寫多行是正常需求，攻擊面不在那裡
+ * （自審藏在自由欄裡騙不過閘：閘比對的角色只從角色欄讀）。
+ *
+ * @param {string} body @returns {string[]}
+ */
+export function roleFieldContinuationProblems(body) {
+  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
+  /** @type {string[]} */ const problems = [];
+  for (const field of ['實作者', '獨立審查者']) {
+    const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：].*$`, 'm');
+    const m = clean.match(re);
+    if (!m || m.index === undefined) continue;
+    const lines = clean.slice(m.index + m[0].length).split('\n').slice(1);
+    for (const line of lines) {
+      if (!line.trim()) break;                                             // 空行＝清單項結束
+      if (/^[^\S\n]*(?:[-*+]|\d+[.)])[^\S\n]+/.test(line)) break;     // 下一個清單項
+      if (/^#{1,6}\s/.test(line)) break;                                  // 標題
+      problems.push(`「${field}」欄位下面有續行「${line.trim().slice(0, 40)}」`
+        + '——角色欄不得有任何續行（GitHub 會把它渲染進同一格，等於加註）。');
+      break;
+    }
+  }
+  return problems;
+}
+
+/**
  * 檢查一份 PR 說明。回傳問題清單（空陣列＝通過）。
  * @param {string} body @returns {string[]}
  */
 export function problemsOf(body) {
-  /** @type {string[]} */ const problems = [];
+  /** @type {string[]} */ const problems = [...roleFieldContinuationProblems(body)];
   /** @type {Record<string,string>} */ const got = {};
   for (const f of REQUIRED_FIELDS) {
     const n = fieldCount(body, f);
