@@ -84,6 +84,20 @@ export function fieldValue(body, field) {
 }
 
 /**
+ * 同一欄位在說明裡出現幾次。
+ * ⚠️ **每個必填欄位必須恰好出現一次**（本 repo r1 High②）：只讀第一個命中的話，
+ *    「實作者：Claude／實作者：Codex／獨立審查者：Codex」會被判成 Claude 實作、Codex 審——
+ *    自審藏在第二個欄位裡，機器只看見第一個。基準版本同理（兩個 SHA 各指一版＝歧義）。
+ * @param {string} body @param {string} field @returns {number}
+ */
+export function fieldCount(body, field) {
+  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
+  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`, 'gm');
+  return (clean.match(re) || []).length;
+}
+
+/**
  * 角色偵測用的**唯一**正規化管線（Codex #379 r4：括號掃描與最終比對必須看同一種形式）。
  *
  * 疊四層，各擋一類藏法（r3→r4 連兩輪的教訓＝少一層就有對應的繞法）：
@@ -133,7 +147,12 @@ export function canonicalRole(raw) {
   //   但那個欄位實際上提到了兩個角色，語意上正是「看不出是誰」。
   for (const inner of bare.match(/\([^)]*\)/g) || []) {
     // bare 已經過 probeNormalize——括號內的藏字元在這之前就被折掉了（r4 的四個重現都在這裡歸位）
-    if (ROLES.some((r) => new RegExp(r, 'i').test(inner))) return null;
+    // ⚠️ 掃之前先拔掉空白與常見分隔符（本 repo r1 High①）：`Claude（Co dex 也有動）`——
+    //    「Co dex」中間一個普通空格就讓 /Codex/i 掃不中，括號整段被剝掉後剩乾淨的 Claude。
+    //    劃界照舊：這裡擋的是分隔符藏法；語意上完全改寫的描述（「另一位也有動」）不是機器能懂的，
+    //    那一層靠審查者讀 PR，不靠這支。
+    const innerFlat = inner.replace(/[\s\-_.]+/g, '');
+    if (ROLES.some((r) => new RegExp(r, 'i').test(innerFlat))) return null;
   }
   const t = bare
     .replace(/\([^)]*\)/g, '')                 // 括號註記（「Claude（已看過）」；NFKC 後全形括號已折成半形）
@@ -152,9 +171,13 @@ export function problemsOf(body) {
   /** @type {string[]} */ const problems = [];
   /** @type {Record<string,string>} */ const got = {};
   for (const f of REQUIRED_FIELDS) {
+    const n = fieldCount(body, f);
+    if (n > 1) problems.push(`「${f}」出現 ${n} 次——每個必填欄位必須恰好一次，重複的欄位是歧義（自審可以藏在第二個裡）`);
     const v = fieldValue(body, f);
     got[f] = v;
-    if (!v) problems.push(`缺「${f}」`);
+    // ⚠️ 判空要用 probeNormalize 後的值（本 repo r1 Medium①）：單一個 U+200B 零寬空白
+    //    trim() 不會除掉，「視覺上空白的欄位」就會過關——五欄齊全變成假宣稱。
+    if (!probeNormalize(v).trim()) problems.push(`缺「${f}」`);
   }
   const implRaw = got['實作者'];
   const revRaw = got['獨立審查者'];
@@ -250,7 +273,7 @@ export function main(argv) {
     return 0;
   }
   console.error(`協作欄位閘 PR #${pr}：**未通過**\n` + problems.map((p) => `  ・${p}`).join('\n')
-    + '\n\n請照 .github/pull_request_template.md 補齊再合併（規則見 AGENTS.md「審查與合併」節）。');
+    + '\n\n請照 .github/pull_request_template.md 補齊再合併（規則見 CLAUDE.md「分工」節）。');
   return 1;
 }
 
