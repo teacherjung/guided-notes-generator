@@ -104,17 +104,32 @@ def main():
     spaced = re.findall(r"【\d+】[ \t　]+[＿_]", parts.get("B", ""))
     if spaced:
         bad(f"S 版有 {len(spaced)} 個空在【n】與底線之間夾了空白（Grok 掃 #17：這種寫法既不算合法空、也不進半形檢查，會靜默漏計）")
-    # 三色標記（提示詞硬性規定 5）：每個 [藍]／[紅] 必須有配對的 [/藍]／[/紅]，且不可交錯或巢狀（Grok 掃 #16）
-    for label in ("藍", "紅"):
-        for part_name in ("A", "B"):
-            text = parts.get(part_name, "")
-            depth, broken = 0, False
-            for tok in re.findall(rf"\[/?{label}\]", text):
-                depth += -1 if tok.startswith("[/") else 1
-                if depth not in (0, 1):
-                    broken = True; break
-            if broken or depth != 0:
-                bad(f"Part {part_name} 的 [{label}]…[/{label}] 標記沒有正確配對（開 {text.count('['+label+']')} 個、關 {text.count('[/'+label+']')} 個）")
+    # 三色標記（提示詞硬性規定 5；Grok 掃 #16 立、Codex r11 修）：
+    # 用**單一堆疊**驗整條標記序列——藍紅分開驗會放過異色交錯 [藍][紅]AB[/藍][/紅]。
+    # 規則：開必配關、同色配對、不巢狀（堆疊深度 ≤1）；T 與 S 的標記序列必須完全相同
+    # （空挖在標記裡面，標記是結構）；挖空撈回的原文不得含任何標記（S 版吞掉整組標記＝結構被挖掉）。
+    TAG = re.compile(r"\[/?(藍|紅)\]")
+    def tag_problems(text):
+        stack = []
+        for m in TAG.finditer(text):
+            tok, color = m.group(0), m.group(1)
+            if tok.startswith("[/"):
+                if not stack or stack[-1] != color:
+                    return f"「{tok}」沒有對應的開標記（或與前一個開標記異色）"
+                stack.pop()
+            else:
+                if stack:
+                    return f"「{tok}」出現在「[{stack[-1]}]」還沒關閉時（標記不可巢狀或交錯）"
+                stack.append(color)
+        return f"「[{stack[-1]}]」沒有關閉" if stack else None
+    for part_name in ("A", "B"):
+        err = tag_problems(parts.get(part_name, ""))
+        if err:
+            bad(f"Part {part_name} 的三色標記序列不合法：{err}")
+    seqA = TAG.findall(parts.get("A", "")); seqB = TAG.findall(parts.get("B", ""))
+    if seqA != seqB:
+        bad(f"T 版與 S 版的三色標記序列不同（T {len(seqA)} 個、S {len(seqB)} 個）——標記是結構，S 版不得增刪或被挖空吞掉")
+
     if "A" not in parts or "B" not in parts:
         print("\n".join(out) + "\n\n無 T/S 版，無法繼續。")
         sys.exit(1)
@@ -185,6 +200,9 @@ def main():
         swallowed = [n for n, g in recovered if PAGE.search(g)]
         if swallowed:
             bad(f"這些空吃掉了分頁點，S 版漏了一整段：{swallowed}")
+        tagged = [n for n, g in recovered if TAG.search(g)]
+        if tagged:
+            bad(f"這些空把三色標記吞進去了（空要挖在標記裡面，標記留在 S 版）：{tagged}")
         declared = declared_originals(parts.get("C", ""))
         if declared.get("__dupes__"):
             bad(f"Part C 有重複編號的列：{sorted(declared['__dupes__'])}（同號兩列＝申報歧義）")
