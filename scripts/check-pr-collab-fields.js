@@ -82,7 +82,14 @@ export function cleanBody(body) {
     if (/^(?: {4,}|\t)/.test(line)) return '\x00';          // 縮排 code
     return line.replace(/`[^`\n]*`/g, '\x00');              // 行內 code span
   }).join('\n');
-  return masked.replace(/<!--[\s\S]*?-->/g, '');
+  // 註解**換佔位符，不刪除**（r10）：刪除會把註解兩側的文字拼接起來——
+  // `-<!--x--> **實作者**：…` 刪完變成完美的 `- **實作者**：…`，檢查器看到合法清單、
+  // GitHub 渲染的卻是段落（`-` 後緊接註解不是清單標記）。佔位符讓拼接不可能發生。
+  // ⚠️ 註解用 \x01、code 遮蔽用 \x00，**兩種佔位不可混**：整行註解（模板頂部的合法
+  // 用法）視同空行、可當前導略過；整行 code 遮蔽必須保持「非法前導」身分——
+  // 第一版把兩者都當空行，fence 前導保護當場被自己的測試抓到拆掉。
+  const stripped = masked.replace(/<!--[\s\S]*?-->/g, '\x01');
+  return stripped.split('\n').map((l) => (/^[\s\x01]*$/.test(l) ? '' : l)).join('\n');
 }
 
 /** 五個必填欄位。**這份清單是單一真相**——`.github/pull_request_template.md` 照它。 */
@@ -255,9 +262,9 @@ export function fieldBlockShapeProblems(body) {
     // 欄位行內禁止語境開啟符（r8 起；r9 補 `[`）：`<` 開 raw HTML、反引號開（跨行）
     // code span、`[` 開連結／圖片（`![…](…)` 的吞行力在 r9 被實測）、\x00 是遮蔽產物。
     // 值需要這些符號時，寫在五欄之後的說明區。
-    const banned = line.match(/[<\`\[\x00]/);
+    const banned = line.match(/[<\`\[\x00\x01]/);
     if (banned) {
-      return [`「${REQUIRED_FIELDS[k]}」那一行含「${banned[0] === '\x00' ? '程式碼片段' : banned[0]}」`
+      return [`「${REQUIRED_FIELDS[k]}」那一行含「${banned[0] === '\x00' ? '程式碼片段' : banned[0] === '\x01' ? '行內註解' : banned[0]}」`
         + '——五欄行內不得出現 `<`、反引號、`[` 或程式碼片段（它們會改變後續欄位的渲染語境）。'
         + '需要這些符號的內容寫在五欄之後的說明區。'];
     }
