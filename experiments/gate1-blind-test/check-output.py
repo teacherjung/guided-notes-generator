@@ -15,7 +15,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 BLANK = re.compile(r"【(\d+)】＿{2,}")          # 提示詞規定全形 ＿；至少兩個才算空
 HALF = re.compile(r"【\d+】[＿_]*_[＿_]*")        # 混進半形 _ 的＝格式違規（Codex PR#2 r2）
-PAGE = re.compile(r"-{2,}\s*第\s*(\d+)\s*頁\s*-{2,}")
+PAGE = re.compile(r"^--- 第 (\d+) 頁 ---$", re.M)   # 提示詞要求精確形式（Codex PR#2 r4：寬鬆版放行 -- 第 9 頁 ----）
 
 
 def norm(s):
@@ -193,7 +193,8 @@ def main():
     print("\n" + ("— 機械檢查全過，可以送 William 紅筆。" if not fail
                   else f"— {fail} 項不合格。格式沒過就退回重做，不要拿去佔用 William 的紅筆時間。"))
     (HERE / "run").mkdir(exist_ok=True)
-    (HERE / "run" / "check-report.md").write_text(
+    # 報告檔名跟輸入檔走（Codex PR#2 r4：甲乙依序跑會互相覆寫）
+    (HERE / "run" / f"check-report-{src.stem}.md").write_text(
         f"# 機械檢查報告\n\n來源：`{src}`\n\n```\n{report}\n```\n", encoding="utf-8")
     sys.exit(1 if fail else 0)
 
