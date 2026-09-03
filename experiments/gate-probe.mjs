@@ -1,6 +1,9 @@
 // 一次性探針（不是產品程式）：送格式偏差的 PR 說明樣本，確認協作欄位檢查會提醒補正。
 // 本專案的老教訓：檢查器不能只看它通過正常案，要先送偏差樣本確認提醒有出現。
-import { problemsOf, ROLES } from '../scripts/check-pr-collab-fields.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+import { problemsOf, staleBaseProblems, ROLES } from '../scripts/check-pr-collab-fields.js';
 const cases = [
   ['空模板（五欄全空）＝應退回', `## 協作欄位\n- **實作者**：\n- **獨立審查者**：\n- **基準版本**：\n- **預計修改的共享檔案**：\n- **這支若完全失敗，最糟失去什麼**：`, 'block'],
   ['Grok 實作／Codex 審＝合法組合（實作者≠審查者；本專案預設是 Claude 實作，但閘不管預設，只管不變量），必須放行', `- **實作者**：Grok\n- **獨立審查者**：Codex\n- **基準版本**：abc1234\n- **預計修改的共享檔案**：無\n- **這支若完全失敗，最糟失去什麼**：一版演算法重寫`, 'pass'],
@@ -104,6 +107,19 @@ const cases = [
   // 以下＝Codex r28（基準 32600db）：三處空判定歸一後的一致性案例
   ['縮排＋U+00A0 行（三定義一致後屬 code 行）＝應退回', `    \u00A0\n- **實作者**：Claude\n- **獨立審查者**：Codex\n- **基準版本**：abc1234\n- **預計修改的共享檔案**：無\n- **這支若完全失敗，最糟失去什麼**：無`, 'block'],
 ];
+
+// ＝＝＝ 官方模板本體（Grok 掃 #12：29 輪都在測合成字串，沒人把真模板送進閘——
+//       模板改版後這一段自動跟上，「空模板案」不再是手寫仿品）＝＝＝
+const TEMPLATE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', '.github', 'pull_request_template.md'), 'utf8');
+const FILLED = TEMPLATE
+  .replace('- **實作者**：', '- **實作者**：Claude')
+  .replace('- **獨立審查者**：', '- **獨立審查者**：Codex')
+  .replace('- **基準版本**：', '- **基準版本**：abc1234')
+  .replace('- **預計修改的共享檔案**：', '- **預計修改的共享檔案**：無')
+  .replace('- **這支若完全失敗，最糟失去什麼**：', '- **這支若完全失敗，最糟失去什麼**：無');
+cases.push(['官方模板原樣（未填）＝應退回', TEMPLATE, 'block']);
+cases.push(['官方模板照說明填好＝應通過', FILLED, 'pass']);
+
 // ⚠️ 每案帶**機器可驗的預期值**（r15）：舊版只印結果，案例名寫「應退回」但迴圈不驗證，
 //    判定反轉照樣 exit 0——探針自己就是「綠燈不代表有在守」的標本。
 //    現在：任一案結果與預期不符＝印 FAIL＋exit 1。
@@ -117,8 +133,26 @@ for (const [name, body, expect] of cases) {
   console.log(`\n[${ok ? (got === 'block' ? '擋下' : '放行') : 'FAIL'}] ${name}`);
   p.forEach((x) => console.log('   ・' + x));
 }
+// ＝＝＝ staleBaseProblems 直測（Grok 掃 #7/#13/#14：合併閘＝problemsOf＋staleBaseProblems
+//       兩段，探針原本只測前半——「該擋的全擋」的宣稱要涵蓋整條路徑）＝＝＝
+const HEAD = 'abc1234f000000000000000000000000000000ff';
+const staleCases = [
+  ['基準＝head 前綴', '- **基準版本**：abc1234', 'pass'],
+  ['基準＝別的 SHA', '- **基準版本**：deadbee', 'block'],
+  ['基準＝無', '- **基準版本**：無', 'block'],
+  ['空白拆開的 hex 段（各自不足七碼）', '- **基準版本**：ab c1234', 'block'],
+  ['星號拆開的 hex 段', '- **基準版本**：ab*c1234', 'block'],
+  ['成對粗體包 SHA', '- **基準版本**：**abc1234**', 'pass'],
+];
+for (const [name, body, expect] of staleCases) {
+  const got = staleBaseProblems(body, HEAD).length ? 'block' : 'pass';
+  const okS = got === expect;
+  if (!okS) failed++;
+  console.log(`[${okS ? (got === 'block' ? '擋下' : '放行') : 'FAIL'}] staleBase：${name}`);
+}
+
 if (failed) {
   console.error(`\n✗ ${failed} 案與預期不符`);
   process.exit(1);
 }
-console.log(`\n✓ ${cases.length} 案全部符合預期`);
+console.log(`\n✓ ${cases.length + staleCases.length} 案全部符合預期（problemsOf ${cases.length}＋staleBase ${staleCases.length}）`);

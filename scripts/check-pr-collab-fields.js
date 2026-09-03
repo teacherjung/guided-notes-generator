@@ -25,7 +25,9 @@ import { gitEnv } from '../lib/git-env.js';
 
 /**
  * ⚠️ **本檔 2026-09-01 自 teaching-videos repo 移植**（該檔又源自理財 webapp，2026-08-25 分家時搬過去）。
- *    本專案只改了兩處：**角色表加 Grok**、檔頭這段實況說明。其餘一字未動——
+ *    移植當下只改了角色表加 Grok；此後經本 repo PR #1 的 29 輪審查大幅演進
+ *    （形狀白名單、前導字元白名單、嚴格 ASCII 角色比對、唯一定義群——沿革見各函式
+ *    docstring 與 git log），「其餘一字未動」已不成立（Grok 掃 #6 抓到宣稱過期）。其餘一字未動——
  *    底下每一條註解都對應理財 webapp 的一次真實事故，重寫會讓教訓失去出處。
  *    以下註解提到的考題檔
  *    （`test/…`）、其他 `scripts/check-*.js`（如 `check-pr-merge-gate.js`）與 PR 編號
@@ -330,7 +332,7 @@ export function fieldBlockShapeProblems(body) {
   // 漢字、常用全形標點。集合外的一切（盲文空白、其他文字系統、emoji、
   // 全部 Cf/M/So 怪字元）一律退回——正文區不受限。
   const BANNED_ASCII = /[\u0060~&$<\[\\\x00\x01]/;
-  const ALLOWED = /^[\u0020\u0021-\u007E\p{Script=Han}：、。，；！？「」『』（）—…·]*$/u;
+  const ALLOWED = /^[\u0020\u0021-\u007E\p{Script=Han}：、。，；！？「」『』（）《》【】・／—…·]*$/u;
   // 整行合法註解的豁免**只免註解記號本身**（<、>、!、-）：
   // 清理後為空＝cleanBody 判定的合法註解行，但那個判定在 masked 文本上做（r12 老課題）
   // ——跨行「合法」註解內若藏 code 記號，GitHub 的邊界解讀仍會分岔（r12–r15 全族）。
@@ -449,7 +451,10 @@ function fetchPr(pr) {
  * @param {string} body @param {string} head @returns {string[]}
  */
 export function staleBaseProblems(body, head) {
-  const raw = fieldValue(body, '基準版本').replace(/[`*_\s]/g, '');
+  // ⚠️ 不剝分隔符（Grok 掃 #9）：先刪 `*_ 空白再抓 hex，「80 ee738」「80*ee738」會被
+  //    拼接成 head 前綴——顯示值不是 SHA、拼完卻通過。只剝成對 wrapper 由白名單管，
+  //    hex run 在原值上取極大段，被拆開的段各自不足七碼＝讀不出 SHA，照實報錯。
+  const raw = fieldValue(body, '基準版本');
   // ⚠️ **抓「每一個」候選、而且要求全部都對**（Codex #382 r5 Medium）。
   //    第一版只抓第一段十六進位，於是：
   //      ・`d6c4fbd / f76d12b` 通過，反過來寫卻被拒——**結果取決於排列順序**

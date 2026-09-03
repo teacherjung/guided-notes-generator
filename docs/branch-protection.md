@@ -16,13 +16,13 @@
 
 ## 驗證紀錄
 
-- 2026-09-02：直推 main 實測 → 被拒。閘會叫。實際輸出：
+- 2026-09-02：直推 main 實測 → 被拒。實際輸出如下——⚠️ 它證明**分支保護生效**，但輸出裡沒有 check 名，指不出擋的是哪一道（Grok 掃 #5：先前寫「訊息指名 required check」是宣稱超過輸出）：
   ```
   remote: error: GH006: Protected branch update failed for refs/heads/main.
    ! [remote rejected] claude/branch-protection-doc -> main (protected branch hook declined)
   ```
   （2026-09-01 首測同結果；當時寫「見下方輸出」卻沒貼——引用要兌現，Codex r1 Low 抓到。）
-- 協作欄位閘離線探針 `experiments/gate-probe.mjs` → 該擋的全擋、該放的照放（案例數刻意不寫死——每輪審查抓到的繞法都會轉成常設案例，寫死的數字自己會漂；以跑一次的輸出為準）。
+- 協作欄位閘離線探針 `experiments/gate-probe.mjs` → 該擋的全擋、該放的照放，涵蓋**整條合併閘路徑**（problemsOf＋staleBaseProblems 兩段都測，含官方模板本體案；Grok 掃 #7 抓到先前只測前半段）。案例數不寫死，以跑一次的輸出為準。
 
 ## 重設方式
 
