@@ -13,7 +13,8 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BLANK = re.compile(r"【(\d+)】[＿_]{2,}")   # 至少兩個底線才算空（單一 _ 不算）
+BLANK = re.compile(r"【(\d+)】＿{2,}")          # 提示詞規定全形 ＿；至少兩個才算空
+HALF = re.compile(r"【\d+】[＿_]*_[＿_]*")        # 混進半形 _ 的＝格式違規（Codex PR#2 r2）
 PAGE = re.compile(r"-{2,}\s*第\s*(\d+)\s*頁\s*-{2,}")
 
 
@@ -36,24 +37,29 @@ def declared_originals(part_c):
     return found
 
 
-def squash(s):
-    """比對用：去空白、去 $ 與反引號——原文欄在表格裡難免被改寫這些裝飾。"""
-    return re.sub(r"[\s$`]", "", s)
+def same_text(recovered, declared):
+    """精確相等（Codex PR#2 r2：去空白／$／反引號的寬鬆比對讓「$x$\\n」對上「x」，
+    S 版連換行一起吞也過關）。只容許首尾空白差異；Part C 是表格欄、放不下換行，
+    所以撈回的原文若含換行就一定不等——這正好關掉吞行的路。"""
+    return recovered.strip() == declared.strip()
 
 
 def split_parts(text):
-    parts, cur, buf = {}, None, []
+    """回傳 (parts, 出現順序)。重複標題不覆蓋、保留順序，讓主程式能判重複與亂序
+    （Codex PR#2 r2：dict 覆蓋＋只查 key 存在，空的 Part E 也算有）。"""
+    parts, order, cur, buf = {}, [], None, []
     for line in text.splitlines():
         m = re.match(r"^#{1,4}\s*Part\s+([A-E])\b", line.strip(), re.I)
         if m:
             if cur:
-                parts[cur] = "\n".join(buf)
+                parts.setdefault(cur, []).append("\n".join(buf))
             cur, buf = m.group(1).upper(), []
+            order.append(cur)
         elif cur:
             buf.append(line)
     if cur:
-        parts[cur] = "\n".join(buf)
-    return parts
+        parts.setdefault(cur, []).append("\n".join(buf))
+    return {k: v[0] for k, v in parts.items()}, order
 
 
 def main():
@@ -61,7 +67,7 @@ def main():
     if not src.exists():
         sys.exit(f"✗ 找不到 {src}。把 Grok 的整份輸出存成這個檔再跑。")
 
-    parts = split_parts(src.read_text(encoding="utf-8"))
+    parts, order = split_parts(src.read_text(encoding="utf-8"))
     out, fail = [], 0
 
     def ok(msg):
@@ -75,6 +81,18 @@ def main():
     missing = [p for p in "ABCDE" if p not in parts]
     if missing:
         bad(f"缺少 Part {'、'.join(missing)}（提示詞要求五部分齊全）")
+    dupes = sorted({p for p in order if order.count(p) > 1})
+    if dupes:
+        bad(f"Part {'、'.join(dupes)} 出現不只一次（重複標題＝歧義，不接受）")
+    if order != sorted(order) or [p for p in "ABCDE" if p in order] != [p for p in order if p in "ABCDE"]:
+        bad(f"Part 順序不對：實得 {'→'.join(order)}，應為 A→B→C→D→E")
+    empty = [p for p in "ABCDE" if p in parts and not parts[p].strip()]
+    if empty:
+        bad(f"Part {'、'.join(empty)} 是空的（有標題沒內容；Part E 是這份工作最重要的產出之一，空白不接受）")
+    # 混進半形底線的空＝格式違規（提示詞硬性規定全形 ＿）
+    half = HALF.findall(parts.get("B", ""))
+    if half:
+        bad(f"S 版有 {len(half)} 個空混用半形底線（提示詞規定全形 ＿）：{half[:4]}")
     if "A" not in parts or "B" not in parts:
         print("\n".join(out) + "\n\n無 T/S 版，無法繼續。")
         sys.exit(1)
@@ -131,7 +149,7 @@ def main():
         for n, g in recovered:
             if n not in declared:
                 mismatch.append(f"【{n}】Part C 沒有申報原文")
-            elif squash(g) != squash(declared[n]):
+            elif not same_text(g, declared[n]):
                 mismatch.append(f"【{n}】撈回「{g.strip()[:30]}…」≠ 申報「{declared[n][:30]}…」")
         if mismatch:
             bad("挖空原文與 Part C 申報不符（S 版吞了不該刪的字，或清單填錯）：\n      "

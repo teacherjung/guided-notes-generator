@@ -74,10 +74,14 @@ python3 experiments/gate1-blind-test/build-kit.py
    `run/stewart-15.4-body.pdf`、貼上 `run/prompt-filled.md`。
    ⚠️ 為什麼要兩個：少了真筆記這個外部錨點，同一份輸出沒辦法同時裁決「準則清不清楚」與
    「Grok 能不能當實作者」。兩個都錯在同一處＝準則的問題；只有一個錯＝那個執行者的問題。
-3. 兩份輸出各存成 `run/output-甲.md`、`run/output-乙.md`，各過一次機械檢查：
+3. 兩份輸出各存成 `run/output-jia.md`、`run/output-yi.md`（檔名英文，鐵則 3），各過一次機械檢查：
 
 ```bash
-python3 experiments/gate1-blind-test/check-output.py
+python3 experiments/gate1-blind-test/check-output.py experiments/gate1-blind-test/run/output-jia.md
+```
+
+```bash
+python3 experiments/gate1-blind-test/check-output.py experiments/gate1-blind-test/run/output-yi.md
 ```
 
    檢查的是格式與自洽（S/T 同構、編號連號、清單列數、實測挖空比例），**不是挖空品質**。
@@ -89,7 +93,7 @@ python3 experiments/gate1-blind-test/check-output.py
    盲訂出來的不是門檻是亂數。
    ⚠️ **1-A 全部判完之前不可以打開參考組**（`CH15 (T).pdf` / `Calc_07 (S).pdf`）。
    1-B 要靠 1-A 的判定當存證，才分得開「AI 判錯」與「參考組當年寫得鬆」。
-5. 判定寫回 PLAN.md 閘門表（通過／不通過）；
+5. 判定寫回 PLAN.md 閘門表——**第一輪是校準輪，只寫「可測／不可測」**；第二輪起才寫通過／不通過；
    準則要補的條文，改在 `docs/blanking-rules.md` 並走 PR（**改準則＝改演算法**，CLAUDE.md 鐵則 6）；
    條號 A1–D3 是穩定 ID 不可重編，新增的往後接。
 
