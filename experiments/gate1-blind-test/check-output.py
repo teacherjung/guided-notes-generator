@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""機械檢查 Grok 的盲測輸出（一次性實驗，非產品程式）。
+"""機械檢查執行者的輸出（一次性實驗，非產品程式）。
 
 檢查的是**格式與自洽**，不是挖空品質——品質只有 William 的紅筆能評。
 這支存在的理由：同構性與數量比例可以算，能算的就不要用眼睛看，
 不然「S 版偷偷改寫了 T 版一句話」這種錯會靜靜地過關。
 
-用法：python3 experiments/gate1-blind-test/check-output.py [run/grok-output.md]
+用法：python3 experiments/gate1-blind-test/check-output.py run/output-jia.md（甲乙各跑一次）
 """
 import difflib
 import re
@@ -36,7 +36,10 @@ def declared_originals(part_c):
         # 先照「未跳脫的 |」切欄、再還原 \\|（Codex PR#2 r3：先 split 再還原會把 $\\|x\\|$ 切碎）
         cells = [c.strip() for c in re.split(r"(?<!\\)\|", row.strip("|"))]
         if len(cells) >= 3 and cells[0].isdigit():
-            found[int(cells[0])] = cells[2].replace("\\|", "|")
+            n = int(cells[0])
+            if n in found:
+                found.setdefault("__dupes__", set()).add(n)   # 重複編號（Grok 掃 #19：後列覆蓋前列會靜默）
+            found[n] = cells[2].replace("\\|", "|")
     return found
 
 
@@ -66,9 +69,11 @@ def split_parts(text):
 
 
 def main():
-    src = Path(sys.argv[1]) if len(sys.argv) > 1 else HERE / "run" / "grok-output.md"
+    if len(sys.argv) < 2:
+        sys.exit("用法：check-output.py <輸出檔>（例：run/output-jia.md；甲乙各跑一次，報告檔依輸入檔命名）")
+    src = Path(sys.argv[1])
     if not src.exists():
-        sys.exit(f"✗ 找不到 {src}。把 Grok 的整份輸出存成這個檔再跑。")
+        sys.exit(f"✗ 找不到 {src}。把執行者的整份輸出存成這個檔再跑。")
 
     parts, order = split_parts(src.read_text(encoding="utf-8"))
     out, fail = [], 0
@@ -96,6 +101,20 @@ def main():
     half = HALF.findall(parts.get("B", ""))
     if half:
         bad(f"S 版有 {len(half)} 個空混用半形底線（提示詞規定全形 ＿）：{half[:4]}")
+    spaced = re.findall(r"【\d+】[ \t　]+[＿_]", parts.get("B", ""))
+    if spaced:
+        bad(f"S 版有 {len(spaced)} 個空在【n】與底線之間夾了空白（Grok 掃 #17：這種寫法既不算合法空、也不進半形檢查，會靜默漏計）")
+    # 三色標記（提示詞硬性規定 5）：每個 [藍]／[紅] 必須有配對的 [/藍]／[/紅]，且不可交錯或巢狀（Grok 掃 #16）
+    for label in ("藍", "紅"):
+        for part_name in ("A", "B"):
+            text = parts.get(part_name, "")
+            depth, broken = 0, False
+            for tok in re.findall(rf"\[/?{label}\]", text):
+                depth += -1 if tok.startswith("[/") else 1
+                if depth not in (0, 1):
+                    broken = True; break
+            if broken or depth != 0:
+                bad(f"Part {part_name} 的 [{label}]…[/{label}] 標記沒有正確配對（開 {text.count('['+label+']')} 個、關 {text.count('[/'+label+']')} 個）")
     if "A" not in parts or "B" not in parts:
         print("\n".join(out) + "\n\n無 T/S 版，無法繼續。")
         sys.exit(1)
@@ -167,6 +186,8 @@ def main():
         if swallowed:
             bad(f"這些空吃掉了分頁點，S 版漏了一整段：{swallowed}")
         declared = declared_originals(parts.get("C", ""))
+        if declared.get("__dupes__"):
+            bad(f"Part C 有重複編號的列：{sorted(declared['__dupes__'])}（同號兩列＝申報歧義）")
         mismatch = []
         for n, g in recovered:
             if n not in declared:
@@ -186,7 +207,7 @@ def main():
             "T版", "S版（拿掉挖空標記）", n=1, lineterm="")][:24]
         out.extend("    " + d for d in diff)
 
-    # 4. 數量與比例（Part D 是 Grok 自稱的，這裡是實測的）
+    # 4. 數量與比例：印實測值供 William 對照 Part D 自評；不核對 Part D、不因不符而 fail（自評數字是它的功課，不是閘）
     if recovered:
         # 分子分母同一算法（r9：分子含換行與空白、分母不含，多行挖空可算出 >100%）
         blank_chars = sum(len(re.sub(r"\s", "", g)) for _, g in recovered)

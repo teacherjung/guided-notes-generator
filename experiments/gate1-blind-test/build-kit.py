@@ -103,16 +103,20 @@ def main():
     if len(sections) != 4:
         die(f"準則檔裡找到 {len(sections)} 個 A–D 節，應該是 4 個——標題格式被改了？")
     rules = "\n".join(sec.strip() for sec in sections)
-    n_rules = len(re.findall(r"^- \*\*[ABCD]\d", rules, re.M))
+    # 命題者姓名不進考卷（Grok 掃 #11）：條文裡的「（William 原則 n）」是給我們看的出處註記，
+    # 對應試模型是評測脈絡。組裝時剝掉——提示詞是衍生物，正本條文一字不動。
+    rules = re.sub(r"（William 原則 \d+）", "", rules)
+    n_rules = len(re.findall(r"^- \*\*[ABCD]\d+", rules, re.M))
     if n_rules < 4:
         die(f"A–D 四節裡只解析出 {n_rules} 條規則，條列格式被改了？")
-    # 領域相依性標記表要蓋滿十八條。表與條文分開放（標記不進提示詞），分開放就會漂移——
+    # 領域相依性標記表要蓋滿 A–D 現有全部條文（集合相等，不寫死條數——條數會隨 B7… 新增而長）。
+    # 表與條文分開放（標記不進提示詞），分開放就會漂移——
     # 加條規則忘了標，或標記表留著已作廢的條號，都會靜靜地過。
     mark_sec = re.search(r"^## 領域相依性標記.*?(?=^## 修訂紀錄|\Z)", rules_doc, re.M | re.S)
     if mark_sec:
-        ids_in_rules = set(re.findall(r"^- \*\*([ABCD]\d)", rules, re.M))
+        ids_in_rules = set(re.findall(r"^- \*\*([ABCD]\d+)", rules, re.M))
         table = re.search(r"\|\s*類別\s*\|.*?(?=\n\n)", mark_sec.group(0), re.S)
-        marked = set(re.findall(r"[ABCD]\d", table.group(0))) if table else set()
+        marked = set(re.findall(r"[ABCD]\d+", table.group(0))) if table else set()
         if marked != ids_in_rules:
             die("領域相依性標記表與條文對不上："
                 f"只在條文有 {sorted(ids_in_rules - marked)}；只在標記表有 {sorted(marked - ids_in_rules)}")
@@ -138,7 +142,7 @@ def main():
     # 禁詞掃的是**最終要送出去的整份**，不是只掃準則段落——洩題可以從模板漏，也可以從註解漏。
     # 禁詞（Codex PR#2 r1：模板正文自己寫了「這場測驗」「程式比對」，禁詞表沒涵蓋——
     # 洩題原樣進了最終提示詞）。「考」單字不禁：「參考」會誤中。
-    for banned in ("盲測", "真筆記", "試鏡", "評分", "Grok", "測驗", "被考", "考題", "比對", "對答案"):
+    for banned in ("盲測", "真筆記", "試鏡", "評分", "Grok", "測驗", "被考", "考題", "比對", "對答案", "William", "不簡單"):
         if banned in filled:
             die(f"要送出去的提示詞裡出現「{banned}」——應試模型看到就知道自己在被考。"
                 f"那句話應該留在 README 或註解裡（註解會被剝掉）。")
