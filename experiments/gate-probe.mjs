@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
-import { problemsOf, staleBaseProblems, ROLES } from '../scripts/check-pr-collab-fields.js';
+import { problemsOf, staleBaseProblems, gateProblemsOf, ROLES } from '../scripts/check-pr-collab-fields.js';
 const cases = [
   ['空模板（五欄全空）＝應退回', `## 協作欄位\n- **實作者**：\n- **獨立審查者**：\n- **基準版本**：\n- **預計修改的共享檔案**：\n- **這支若完全失敗，最糟失去什麼**：`, 'block'],
   ['Grok 實作／Codex 審＝合法組合（實作者≠審查者；本專案預設是 Claude 實作，但閘不管預設，只管不變量），必須放行', `- **實作者**：Grok\n- **獨立審查者**：Codex\n- **基準版本**：abc1234\n- **預計修改的共享檔案**：無\n- **這支若完全失敗，最糟失去什麼**：一版演算法重寫`, 'pass'],
@@ -145,7 +145,9 @@ const staleCases = [
   ['成對粗體包 SHA', '- **基準版本**：**abc1234**', 'pass'],
 ];
 for (const [name, body, expect] of staleCases) {
-  const got = staleBaseProblems(body, HEAD).length ? 'block' : 'pass';
+  // 走 main 的同一個組合入口（r30）：main 若漏接哪一段，這裡會跟著紅
+  const full = `- **實作者**：Claude\n- **獨立審查者**：Codex\n${body}\n- **預計修改的共享檔案**：無\n- **這支若完全失敗，最糟失去什麼**：無`;
+  const got = gateProblemsOf(full, HEAD).length ? 'block' : 'pass';
   const okS = got === expect;
   if (!okS) failed++;
   console.log(`[${okS ? (got === 'block' ? '擋下' : '放行') : 'FAIL'}] staleBase：${name}`);

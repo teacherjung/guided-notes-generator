@@ -27,8 +27,8 @@ import { gitEnv } from '../lib/git-env.js';
  * ⚠️ **本檔 2026-09-01 自 teaching-videos repo 移植**（該檔又源自理財 webapp，2026-08-25 分家時搬過去）。
  *    移植當下只改了角色表加 Grok；此後經本 repo PR #1 的 29 輪審查大幅演進
  *    （形狀白名單、前導字元白名單、嚴格 ASCII 角色比對、唯一定義群——沿革見各函式
- *    docstring 與 git log），「其餘一字未動」已不成立（Grok 掃 #6 抓到宣稱過期）。其餘一字未動——
- *    底下每一條註解都對應理財 webapp 的一次真實事故，重寫會讓教訓失去出處。
+ *    docstring 與 git log），「其餘一字未動」已不成立（Grok 掃 #6 抓到宣稱過期）。
+ *    仍然成立的是：**webapp 事故對應的註解保留原文**——重寫會讓教訓失去出處。
  *    以下註解提到的考題檔
  *    （`test/…`）、其他 `scripts/check-*.js`（如 `check-pr-merge-gate.js`）與 PR 編號
  *    **都在 webapp、不在本 repo**——本 repo 沒有自動考題，
@@ -478,6 +478,16 @@ export function staleBaseProblems(body, head) {
   return [];
 }
 
+/**
+ * **整條合併閘的唯一組合入口**（r30）：main 與離線探針都呼叫這一個——
+ * 探針原本分別測 problemsOf 與 staleBaseProblems，若 main 日後漏接其中一段，
+ * 探針照綠。共用組合函式後，「涵蓋整條路徑」的宣稱由結構保證。
+ * @param {string} body @param {string} head @returns {string[]}
+ */
+export function gateProblemsOf(body, head) {
+  return [...problemsOf(body), ...staleBaseProblems(body, head)];
+}
+
 /** @param {string[]} argv */
 export function main(argv) {
   const pr = argv[0];
@@ -492,7 +502,7 @@ export function main(argv) {
     console.error(`協作欄位閘 PR #${pr}：查不清楚（${/** @type {any} */ (e)?.message}）——一律當成未通過。`);
     return 2;
   }
-  const problems = [...problemsOf(pull.body), ...staleBaseProblems(pull.body, pull.head)];
+  const problems = gateProblemsOf(pull.body, pull.head);
   if (problems.length === 0) {
     console.log(`協作欄位閘 PR #${pr}：五欄齊全、實作者 ≠ 獨立審查者、基準版本＝目前 head。可繼續合併程序。`);
     return 0;
