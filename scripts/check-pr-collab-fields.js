@@ -231,17 +231,21 @@ export function probeNormalize(v) {
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
-  // 裝飾剝除的**唯一**站（r16）：只剝「成對、包住整個值」的粗斜體 delimiter
-  // （`**Claude**`／`*Claude*`／`__Claude__`／`_Claude_`，可巢狀），由外而內逐層。
-  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）的一律不剝——那些在渲染上就不是
-  // 乾淨的角色名，剝了等於判定與顯示不一致（r16 實測三個假綠）。
-  // 反引號、波浪號照舊不剝（r6）：值裡出現就不等於角色名。
-  let bare = probeNormalize(String(raw || '')).trim();
+  // 裝飾剝除的**唯一**站（r16 立、r17 修順序）。三條規則，每條都是實測假綠換來的：
+  // ①只剝「成對、包住整個值」的**ASCII** delimiter（`**`／`__`／`*`／`_`，可巢狀）——
+  //   剝除在 probeNormalize **之前**做：NFKD 先跑會把全形 ＊＊ 折成 ASCII，
+  //   「＊＊Claude＊＊」（渲染上保留全形星號）就被當成合法粗體（r17）。
+  // ②層間**不 trim**：GitHub 的強調 delimiter 內側不能接空白，「** Claude **」
+  //   不是粗體、渲染保留星號——層間 trim 會把它洗成合法（r17）。
+  // ③probeNormalize 放最後、之後不再 trim，直接精確比對。
+  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）照舊不剝（r16）；反引號、波浪號不剝（r6）。
+  let bare = String(raw || '').trim();
   for (;;) {
     const m = bare.match(/^(\*\*|__|\*|_)(.+)\1$/);
     if (!m) break;
-    bare = m[2].trim();
+    bare = m[2];
   }
+  bare = probeNormalize(bare);
   const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
   return hit.length === 1 ? hit[0] : null;
 }
