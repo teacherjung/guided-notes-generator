@@ -69,6 +69,17 @@ export function normalizeEols(s) {
  *
  * @param {string} body @returns {string}
  */
+/**
+ * 縮排 code 行的**唯一**判定（r14）：行首 ≥4 空白或 tab、且含非空白內容。
+ * r14 實測：cleanBody 與前導檢測各寫一份縮排判定，一份看行首、一份多要求緊接非空白，
+ * 「tab＋空白＋內容」的行被 cleanBody 遮蔽、卻不被前導檢測禁——兩套判定的縫隙就是洞。
+ * 同一個概念只准有一個定義（本檔的老教訓：兩套「行」的定義不一致時，r5 已經栽過一次）。
+ * @param {string} line @returns {boolean}
+ */
+export function isIndentedCodeLine(line) {
+  return /^(?: {4,}|\t)/.test(line) && line.trim() !== '';
+}
+
 export function cleanBody(body) {
   const lines = normalizeEols(body).split('\n');
   let fence = '';   // 目前所在的圍欄記號（'`' 或 '~'），空字串＝不在圍欄裡
@@ -79,7 +90,7 @@ export function cleanBody(body) {
       return '\x00';
     }
     if (open) { fence = open[1][0]; return '\x00'; }
-    if (/^(?: {4,}|\t)/.test(line)) return '\x00';          // 縮排 code
+    if (isIndentedCodeLine(line)) return '\x00';             // 縮排 code（唯一判定）
     return line.replace(/`[^`\n]*`/g, '\x00');              // 行內 code span
   }).join('\n');
   // 註解**換佔位符，不刪除**（r10）：刪除會把註解兩側的文字拼接起來——
@@ -257,7 +268,7 @@ export function fieldBlockShapeProblems(body) {
   const rawLines = normalizeEols(body).split('\n');
   const prelude = rawLines.slice(0, firstIdx + REQUIRED_FIELDS.length);
   const codeMarked = prelude.find((l) =>
-    l.includes('\u0060') || l.includes('~~~') || /^(?: {4,}|\t)\S/.test(l));
+    l.includes('\u0060') || l.includes('~~~') || isIndentedCodeLine(l));
   if (codeMarked !== undefined) {
     return [`PR 說明開頭（協作欄位之前與五欄行）出現 code 類記號（反引號、~~~ 或 ≥4 格縮排）：`
       + `「${codeMarked.trim().slice(0, 40)}」——這些記號會改變前導區的渲染解讀，一律退回。`
