@@ -19,6 +19,13 @@ HALF = re.compile(r"【\d+】[＿_]*_[＿_]*")        # 混進半形 _ 的＝格
 PAGE = re.compile(r"^--- 第 (\d+) 頁 ---$", re.M)   # 提示詞要求精確形式（Codex PR#2 r4：寬鬆版放行 -- 第 9 頁 ----）
 
 
+def lines_of(s):
+    """「行」的**唯一**定義：只認 CRLF／CR／LF（Codex PR#2 r12：splitlines() 把 U+2028、U+2029、
+    NEL 也當換行、重組時全轉成 \\n——T 用 U+2028、S 用真換行，原始字元不同卻被判逐字元相同）。
+    全檔所有切行都走這裡，與 norm() 的正規化範圍一致。"""
+    return s.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+
 def norm(s):
     # 真正逐字元（r1 收縮排、r9 收行尾）：行尾空白也不剝——兩個尾隨空格在 Markdown 是
     # 硬換行語意，剝掉會讓「--- 第 1 頁 ---  」這種帶尾空白的標記被判精確、T/S 差異假綠。
@@ -29,7 +36,7 @@ def norm(s):
 def declared_originals(part_c):
     """Part C 表格的「被挖掉的原文」欄，依編號取出。"""
     found = {}
-    for row in part_c.splitlines():
+    for row in lines_of(part_c):
         row = row.strip()
         if not row.startswith("|") or re.match(r"^\|[\s\-:|]+\|$", row):
             continue
@@ -54,7 +61,7 @@ def split_parts(text):
     """回傳 (parts, 出現順序)。重複標題不覆蓋、保留順序，讓主程式能判重複與亂序
     （Codex PR#2 r2：dict 覆蓋＋只查 key 存在，空的 Part E 也算有）。"""
     parts, order, cur, buf = {}, [], None, []
-    for line in text.splitlines():
+    for line in lines_of(text):
         m = re.match(r"^#{1,4}\s*Part\s+([A-E])\b", line.strip(), re.I)
         if m:
             if cur:
@@ -146,7 +153,7 @@ def main():
     # 橫線類字元改按 Unicode 一般類別 Pd 判定（r7：列舉八種被 U+FE58 穿過——列舉補不完）
     def dashy(line):
         return re.search(r"第\s*\d+\s*頁", line) and any(unicodedata.category(c) == "Pd" for c in line)
-    malformed = [l for l in (T + "\n" + S).splitlines() if dashy(l) and not PAGE.fullmatch(l)]
+    malformed = [l for l in lines_of(T + "\n" + S) if dashy(l) and not PAGE.fullmatch(l)]
     if malformed:
         bad(f"有 {len(malformed)} 行像分頁標記但不是精確的 `--- 第 n 頁 ---`：{malformed[:3]}")
     if tp == sp and tp:
@@ -221,7 +228,7 @@ def main():
         bad("同構失敗：S 版在挖空以外的地方跟 T 版不一樣（改寫／漏行／多行）")
         skeleton = BLANK.sub("", S)
         diff = [d for d in difflib.unified_diff(
-            norm(BLANK.sub("", T)).splitlines(), norm(skeleton).splitlines(),
+            lines_of(norm(BLANK.sub("", T))), lines_of(norm(skeleton)),
             "T版", "S版（拿掉挖空標記）", n=1, lineterm="")][:24]
         out.extend("    " + d for d in diff)
 
@@ -241,7 +248,7 @@ def main():
 
     # 5. 挖空清單列數要對得上
     if "C" in parts:
-        rows = [r for r in parts["C"].splitlines()
+        rows = [r for r in lines_of(parts["C"])
                 if r.strip().startswith("|") and not re.match(r"^\|[\s\-:|]+\|$", r.strip())]
         rows = [r for r in rows if not re.search(r"編號.*原文", r)]
         if nums and len(rows) != len(nums):
