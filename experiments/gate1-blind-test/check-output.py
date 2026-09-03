@@ -31,17 +31,18 @@ def declared_originals(part_c):
         row = row.strip()
         if not row.startswith("|") or re.match(r"^\|[\s\-:|]+\|$", row):
             continue
-        cells = [c.strip() for c in row.strip("|").split("|")]
+        # 先照「未跳脫的 |」切欄、再還原 \\|（Codex PR#2 r3：先 split 再還原會把 $\\|x\\|$ 切碎）
+        cells = [c.strip() for c in re.split(r"(?<!\\)\|", row.strip("|"))]
         if len(cells) >= 3 and cells[0].isdigit():
             found[int(cells[0])] = cells[2].replace("\\|", "|")
     return found
 
 
 def same_text(recovered, declared):
-    """精確相等（Codex PR#2 r2：去空白／$／反引號的寬鬆比對讓「$x$\\n」對上「x」，
-    S 版連換行一起吞也過關）。只容許首尾空白差異；Part C 是表格欄、放不下換行，
-    所以撈回的原文若含換行就一定不等——這正好關掉吞行的路。"""
-    return recovered.strip() == declared.strip()
+    """精確相等，**不 strip**（Codex PR#2 r3：兩側 strip 讓「bar\\n」對上「bar」——
+    S 版把換行連同下一行吞掉、只申報那一行文字，照樣全過）。撈回的原文是 T 版的精確子字串，
+    Part C 的申報欄放不下換行；任何一個字元不同＝不同構，退回去對齊。"""
+    return "\n" not in recovered and recovered == declared
 
 
 def split_parts(text):
