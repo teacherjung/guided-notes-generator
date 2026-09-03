@@ -76,6 +76,16 @@ export function normalizeEols(s) {
  * 同一個概念只准有一個定義（本檔的老教訓：兩套「行」的定義不一致時，r5 已經栽過一次）。
  * @param {string} line @returns {boolean}
  */
+/**
+ * 「空行」的**唯一**定義（r27）：只有半形空格（或什麼都沒有）才算空。
+ * JS 的 trim() 認 U+00A0、全形空白等一大票字元是空白，GitHub 卻把 U+00A0 行
+ * 渲染成實質段落——「空行」也是兩套定義的老病（r5 行、r14 縮排、r27 空行，同族第三隻）。
+ * @param {string} line @returns {boolean}
+ */
+export function isBlankLine(line) {
+  return /^ *$/.test(line);
+}
+
 export function isIndentedCodeLine(line) {
   // CommonMark 的縮排定義是「展開 tab 後 ≥4 列」：tab 推進到下一個 4 的倍數邊界。
   // r15 抓到「1 空格＋tab」（＝1+3＝4 列）不被舊的字面判定（{4,}空白或行首 tab）涵蓋
@@ -285,7 +295,7 @@ export function fieldBlockShapeProblems(body) {
   let firstIdx = -1;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
-    if (!l.trim()) continue;                                    // 空行可略過
+    if (isBlankLine(l)) continue;                               // 空行可略過（唯一定義）
     // 標題例外必須**整行精確匹配**（r8）：`##協作欄位 <details>` 既不是合法 ATX 標題
     // （# 後要有空白），行尾又帶著語境開啟符——只匹配前綴會把它當標題放過。
     if (/^#{1,6}[ \t]+協作欄位[ \t]*$/.test(l)) continue;
@@ -325,8 +335,8 @@ export function fieldBlockShapeProblems(body) {
   // 所以豁免行剝掉註解記號後，其餘字元照白名單驗、縮排照驗；
   // 非豁免行（偽註解、行內註解、一般行）整行照驗。
   const badLine = prelude.find((l, i) => {
-    if (l.trim() === '') return false;
-    const verifiedComment = (lines[i] ?? '').trim() === '';
+    if (isBlankLine(l)) return false;
+    const verifiedComment = isBlankLine(lines[i] ?? '');
     const probe = verifiedComment ? l.replace(/[<>!\-]/g, '') : l;
     return BANNED_ASCII.test(probe) || !ALLOWED.test(probe) || isIndentedCodeLine(l);
   });
