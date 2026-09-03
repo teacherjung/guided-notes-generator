@@ -104,8 +104,11 @@ def main():
     tp, sp = PAGE.findall(T), PAGE.findall(S)
     # 疑似分頁行（有「第 n 頁」＋橫線）卻不是精確形式＝格式違規，不能當普通文字放過
     # （Codex PR#2 r5：合法與錯誤標記並存時，錯誤的那行被當成一般文字、頁數還報錯）。
-    LOOSE = re.compile(r"^.*-+\s*第\s*\d+\s*頁\s*-+.*$", re.M)
-    malformed = [l for l in LOOSE.findall(T + "\n" + S) if not PAGE.fullmatch(l.strip())]
+    # 「第 n 頁」＋任何橫線類字元（ASCII 或全形）的行，就是分頁標記的嘗試——
+    # 不精確就退回，**不 strip**（Codex PR#2 r6：行首多一格空白被 strip 洗掉、
+    # 全形橫線又不在 ASCII 橫線集裡，兩種都溜過）。
+    LOOSE = re.compile(r"^(?=.*第\s*\d+\s*頁)(?=.*[-‐‑‒–—―－]).*$", re.M)
+    malformed = [l for l in LOOSE.findall(T + "\n" + S) if not PAGE.fullmatch(l)]
     if malformed:
         bad(f"有 {len(malformed)} 行像分頁標記但不是精確的 `--- 第 n 頁 ---`：{malformed[:3]}")
     if tp == sp and tp:

@@ -166,7 +166,8 @@ def main():
     print(f"\n填提示詞：\n  ✓ {out.name}（準則 A–D 四節、{n_rules} 條）")
     print(f"  ✓ kit-manifest.txt（這一輪用的準則版本與考題版本）")
     print("\n" + manifest.rstrip())
-    print("\n下一步：開一個全新的 Grok 對話 → 上傳 run/stewart-15.4-body.pdf → 貼上 run/prompt-filled.md")
+    print("\n下一步：開**兩個**全新對話、兩個不同執行模型（甲、乙）→ 各自上傳 run/stewart-15.4-body.pdf")
+    print("        → 各自貼上 run/prompt-filled.md → 輸出各存 run/output-jia.md、run/output-yi.md")
     print("⚠ 那個對話裡不可以出現 CH15 (T).pdf / Calc_07 (S).pdf 的任何內容。")
 
 
