@@ -311,17 +311,30 @@ export function fieldBlockShapeProblems(body) {
   // `~` 在前導區同樣沒有正當用途，整字元退回。
   // r24 補 `$`：GitHub 的 MathJax 擴展（$…$）不在 GFM 標準內——$\phantom{真SHA}假SHA$
   // 渲染上隱藏真值顯示假值。窮舉的母集是「GitHub 實際渲染的一切」，不只 GFM。
-  // r25 補不可見字元整族：雙向控制碼在基準版本欄隱真示假（U+202E ce35812 顯示反序）——
-  // r18 的 ASCII 檢查只護角色欄，其他欄沒人管。與其列舉 bidi，一次禁全族：
-  // 格式字元 \p{Cf}（bidi、零寬、U+2060…）與組合記號 \p{M}（刪除線、變體選擇符…）
-  // 在前導區的合法內容（漢字欄名＋ASCII＋全形冒號＋空白）裡沒有任何正當用途。
-  const codeMarked = prelude.find((l) =>
-    l.includes('\u0060') || l.includes('~') || l.includes('&') || l.includes('$')
-    || /[\p{Cf}\p{M}]/u.test(l) || isIndentedCodeLine(l));
-  if (codeMarked !== undefined) {
-    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~、&、$、不可見控制／組合字元，或 ≥4 格縮排）：`
-      + `「${codeMarked.trim().slice(0, 40)}」——這些記號會讓機器讀的原文與讀者看的渲染分岔，一律退回。`
-      + '程式碼、範例與含 & 的內容請寫在五欄之後的說明區。'];
+  // **前導區改真正的允許字元白名單**（r26 定案）。黑名單走了九輪（code 記號→&→$→
+  // Cf/M…），r26 用 U+2800 盲文空白（So 類，畫面全空）證明：黑名單補不完，
+  // 宣稱「只含合法字元」就要用白名單驗證。允許集＝前導區合法內容的實際需要：
+  // 半形空格、基本 ASCII 可見字元（扣掉語境開啟符 \u0060 ~ & $ < [ \ 與佔位）、
+  // 漢字、常用全形標點。集合外的一切（盲文空白、其他文字系統、emoji、
+  // 全部 Cf/M/So 怪字元）一律退回——正文區不受限。
+  const BANNED_ASCII = /[\u0060~&$<\[\\\x00\x01]/;
+  const ALLOWED = /^[\u0020\u0021-\u007E\p{Script=Han}：、。，；！？「」『』（）—…·]*$/u;
+  // 整行合法註解的豁免**只免註解記號本身**（<、>、!、-）：
+  // 清理後為空＝cleanBody 判定的合法註解行，但那個判定在 masked 文本上做（r12 老課題）
+  // ——跨行「合法」註解內若藏 code 記號，GitHub 的邊界解讀仍會分岔（r12–r15 全族）。
+  // 所以豁免行剝掉註解記號後，其餘字元照白名單驗、縮排照驗；
+  // 非豁免行（偽註解、行內註解、一般行）整行照驗。
+  const badLine = prelude.find((l, i) => {
+    if (l.trim() === '') return false;
+    const verifiedComment = (lines[i] ?? '').trim() === '';
+    const probe = verifiedComment ? l.replace(/[<>!\-]/g, '') : l;
+    return BANNED_ASCII.test(probe) || !ALLOWED.test(probe) || isIndentedCodeLine(l);
+  });
+  if (badLine !== undefined) {
+    return [`PR 說明開頭（協作欄位之前與五欄行）含白名單外的字元或語境記號：`
+      + `「${badLine.trim().slice(0, 40)}」——前導區只准漢字、常用標點與基本 ASCII`
+      + '（反引號、~、&、$、<、[、反斜線與任何不可見／特殊字元都不行），'
+      + '其他內容請寫在五欄之後的說明區。'];
   }
   if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
     return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
