@@ -88,7 +88,15 @@ export function cleanBody(body) {
   // ⚠️ 註解用 \x01、code 遮蔽用 \x00，**兩種佔位不可混**：整行註解（模板頂部的合法
   // 用法）視同空行、可當前導略過；整行 code 遮蔽必須保持「非法前導」身分——
   // 第一版把兩者都當空行，fence 前導保護當場被自己的測試抓到拆掉。
-  const stripped = masked.replace(/<!--[\s\S]*?-->/g, '\x01');
+  // ⚠️ 只有 **GFM 認定合法**的註解才換佔位（r11）：`<!--><details>-->` 這種偽註解
+  //    GFM 不當註解、照渲染出其中的標籤，寬鬆 regex 卻把它整段當註解抹成空白——
+  //    檢查文本刪掉了渲染文本裡真正生效的東西。GFM 的定義：內文不以 `>` 或 `->` 開頭、
+  //    不含 `--`、不以 `-` 結尾。不合格的一律**保留原文**（fail-closed）：
+  //    保留後 `<` 在欄位行是禁字、在前導區是非法前導，兩邊都擋。
+  const stripped = masked.replace(/<!--([\s\S]*?)-->/g, (whole, text) => {
+    const legal = !/^(>|->)/.test(text) && !text.includes('--') && !/-$/.test(text);
+    return legal ? '\x01' : whole;
+  });
   return stripped.split('\n').map((l) => (/^[\s\x01]*$/.test(l) ? '' : l)).join('\n');
 }
 
