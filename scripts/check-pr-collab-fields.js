@@ -247,20 +247,21 @@ export function fieldBlockShapeProblems(body) {
     break;
   }
   if (firstIdx === -1) return [];  // 整份空＝由「缺欄」檢查去報
-  // **前導區的 code／註解記號重疊＝模稜，直接退回**（r12 fail-closed）。
-  // 實測：`<!-- \x60-->\x60<details> -->` ——原文裡 `<!--` 先開始、反引號不是 code span，
-  // 但清理器先遮 code span、再在**遮蔽後**的文本上判註解合法性，偽註解就被判成合法。
-  // 依 GFM 優先序做單遍解析＝重寫 renderer（r5 已認過這條路不走）；
-  // 兩種記號在前導區重疊的正當用法不存在，整類直接退回，錯誤訊息指路。
+  // **前導區禁止一切 code 類記號**（r12 立、r13 推廣並收緊）。
+  // r12 實測：反引號吃掉原始註解的結尾，遮蔽後偽註解變合法；
+  // r13 實測：縮排 code 與 ~~~ fence 同型——**任何**會被 code 階段遮蔽的形式
+  // 都能改寫註解的邊界。與其列舉「哪些重疊算模稜」（列舉補不完），
+  // 直接禁全類：前導區的四種合法狀態（空行／無 code 記號的整行合法註解／
+  // 精確標題行／精確五欄行）沒有一種用得到 code 記號，單獨出現也沒有正當用法。
   // 範圍＝原始文本的第 0 行到第五欄行（所有替換保行數，行號可直接對照）。
   const rawLines = normalizeEols(body).split('\n');
   const prelude = rawLines.slice(0, firstIdx + REQUIRED_FIELDS.length);
-  const hasTick = prelude.some((l) => l.includes('\u0060'));
-  const hasComment = prelude.some((l) => l.includes('<!--') || l.includes('-->'));
-  if (hasTick && hasComment) {
-    return ['PR 說明開頭（協作欄位之前與五欄行）同時出現反引號與 HTML 註解記號——'
-      + '這兩種記號重疊時，機器與 GitHub 的解讀可能不一致，一律退回。'
-      + '反引號與註解都請寫在五欄之後的說明區。'];
+  const codeMarked = prelude.find((l) =>
+    l.includes('\u0060') || l.includes('~~~') || /^(?: {4,}|\t)\S/.test(l));
+  if (codeMarked !== undefined) {
+    return [`PR 說明開頭（協作欄位之前與五欄行）出現 code 類記號（反引號、~~~ 或 ≥4 格縮排）：`
+      + `「${codeMarked.trim().slice(0, 40)}」——這些記號會改變前導區的渲染解讀，一律退回。`
+      + '程式碼與範例請寫在五欄之後的說明區。'];
   }
   if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
     return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
