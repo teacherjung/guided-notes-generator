@@ -132,7 +132,7 @@ export const REQUIRED_FIELDS = [
   '這支若完全失敗，最糟失去什麼',
 ];
 
-/** 合法的角色名（實作者／審查者只能是這三個之一）。 */
+/** 合法的角色名（實作者／審查者只能是本清單之一；數目刻意不寫進句子——寫死的數字自己會漂，r16 抓到一次）。 */
 // ⚠️ 角色表比 webapp 多一個 Grok（本專案把它列為合法角色）。分工現況見 CLAUDE.md「分工」節——
 //    閘只守「實作者≠審查者」這條不變量、不記分工順序，分工變動不需要動這份清單（r2 之前這裡
 //    抄了一份分工順序，分工一改就變成過期複本——會漂的不是規則，是複本）。
@@ -172,7 +172,10 @@ export function fieldValue(body, field) {
   //    允許的形狀：行首可有 `-`／`*` 項目符號與空白，欄名可被 `**`／`__` 包住，然後才是冒號。
   const re = new RegExp(fieldLinePattern(field) + '[^\\S\\n]*(.*)$', 'm');
   const m = clean.match(re);
-  return m ? m[1].trim().replace(/^\*+|\*+$/g, '').trim() : '';
+  // 只抽取與 trim（r16）：裝飾剝除統一由 canonicalRole 處理——
+  // 這裡先剝首尾星號、那裡再剝一次，兩處各剝一半＝`*Claude` 這種**不成對**的
+  // 星號被分兩站洗成乾淨的 Claude，顯示與判定不一致。
+  return m ? m[1].trim() : '';
 }
 
 /**
@@ -228,12 +231,17 @@ export function probeNormalize(v) {
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
-  // 只剝粗斜體裝飾（`**Claude**` 是常見合理寫法）。反引號、波浪號**不剝**（r6 High②）：
-  // 行內 code 是加註的藏身處（`` `<!-- … -->` `` 在渲染上看得見），值裡出現就直接不等於角色名。
-  // cleanBody 已把 code span 換成佔位字元 \x00，留在值裡同樣使比對失敗——兩層都兜。
-  const bare = probeNormalize(String(raw || ''))
-    .replace(/[*_]/g, '')
-    .trim();
+  // 裝飾剝除的**唯一**站（r16）：只剝「成對、包住整個值」的粗斜體 delimiter
+  // （`**Claude**`／`*Claude*`／`__Claude__`／`_Claude_`，可巢狀），由外而內逐層。
+  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）的一律不剝——那些在渲染上就不是
+  // 乾淨的角色名，剝了等於判定與顯示不一致（r16 實測三個假綠）。
+  // 反引號、波浪號照舊不剝（r6）：值裡出現就不等於角色名。
+  let bare = probeNormalize(String(raw || '')).trim();
+  for (;;) {
+    const m = bare.match(/^(\*\*|__|\*|_)(.+)\1$/);
+    if (!m) break;
+    bare = m[2].trim();
+  }
   const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
   return hit.length === 1 ? hit[0] : null;
 }
