@@ -311,10 +311,15 @@ export function fieldBlockShapeProblems(body) {
   // `~` 在前導區同樣沒有正當用途，整字元退回。
   // r24 補 `$`：GitHub 的 MathJax 擴展（$…$）不在 GFM 標準內——$\phantom{真SHA}假SHA$
   // 渲染上隱藏真值顯示假值。窮舉的母集是「GitHub 實際渲染的一切」，不只 GFM。
+  // r25 補不可見字元整族：雙向控制碼在基準版本欄隱真示假（U+202E ce35812 顯示反序）——
+  // r18 的 ASCII 檢查只護角色欄，其他欄沒人管。與其列舉 bidi，一次禁全族：
+  // 格式字元 \p{Cf}（bidi、零寬、U+2060…）與組合記號 \p{M}（刪除線、變體選擇符…）
+  // 在前導區的合法內容（漢字欄名＋ASCII＋全形冒號＋空白）裡沒有任何正當用途。
   const codeMarked = prelude.find((l) =>
-    l.includes('\u0060') || l.includes('~') || l.includes('&') || l.includes('$') || isIndentedCodeLine(l));
+    l.includes('\u0060') || l.includes('~') || l.includes('&') || l.includes('$')
+    || /[\p{Cf}\p{M}]/u.test(l) || isIndentedCodeLine(l));
   if (codeMarked !== undefined) {
-    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~、&、$ 或 ≥4 格縮排）：`
+    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~、&、$、不可見控制／組合字元，或 ≥4 格縮排）：`
       + `「${codeMarked.trim().slice(0, 40)}」——這些記號會讓機器讀的原文與讀者看的渲染分岔，一律退回。`
       + '程式碼、範例與含 & 的內容請寫在五欄之後的說明區。'];
   }
