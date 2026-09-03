@@ -77,7 +77,17 @@ export function normalizeEols(s) {
  * @param {string} line @returns {boolean}
  */
 export function isIndentedCodeLine(line) {
-  return /^(?: {4,}|\t)/.test(line) && line.trim() !== '';
+  // CommonMark 的縮排定義是「展開 tab 後 ≥4 列」：tab 推進到下一個 4 的倍數邊界。
+  // r15 抓到「1 空格＋tab」（＝1+3＝4 列）不被舊的字面判定（{4,}空白或行首 tab）涵蓋
+  // ——當時靠其他前導檢查擋住、未成假綠，但「所有縮排形式由同一定義涵蓋」要成立，
+  // 判定就要照 CommonMark 的列計算，不是照字元樣式列舉。
+  let col = 0;
+  for (const ch of line) {
+    if (ch === ' ') col += 1;
+    else if (ch === '\t') col += 4 - (col % 4);
+    else break;
+  }
+  return col >= 4 && line.trim() !== '';
 }
 
 export function cleanBody(body) {
@@ -130,6 +140,19 @@ export const REQUIRED_FIELDS = [
 export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
 
 /**
+ * 欄位行核心 pattern 的**唯一**來源（r15）：fieldValue／fieldCount／形狀檢查原本
+ * 各寫一份等價 regex——同一概念三份定義，就是 r5／r14 那種縫隙的溫床。
+ * 這裡只定義「這一行提到某欄位」的寬鬆核心（bullet 可選、粗體可選）；
+ * 「這一行是**合法**的欄位行」（精確「- 」前綴、行內禁字）是另一個概念，
+ * 由形狀檢查額外把關，不屬於本工廠。
+ * @param {string} field @returns {string} regex 源字串（不含 flags 與行尾捕獲）
+ */
+export function fieldLinePattern(field) {
+  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return `^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`;
+}
+
+/**
  * 從 PR 說明裡抽出某一欄的值。
  *
  * ⚠️ **必須忽略 HTML 註解**：模板本身就把填寫說明放在 `<!-- -->` 裡，而那些說明裡也出現
@@ -147,10 +170,7 @@ export function fieldValue(body, field) {
   // ⚠️ **必須錨定在行首**（Codex #379 r2 High①）：不錨定的話 `- **非實作者**：Claude`
   //    也會命中——整份 PR 說明可以一個真欄位都沒有，卻被判「五欄齊全」＝機械閘 fail-open。
   //    允許的形狀：行首可有 `-`／`*` 項目符號與空白，欄名可被 `**`／`__` 包住，然後才是冒號。
-  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');   // 欄名含「，」等字元，仍統一跳脫
-  //   ⚠️ 也接受有序清單 `1. **實作者**：`（Codex #379 r3 記錄項）——**噪音型誤擋會讓人乾脆繞過這道閘**，
-  //   而「用 1. 而不是 -」顯然不是想規避什麼。引言符號 `>` 刻意**不接受**：那是引用範例，不該滿足閘。
-  const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：][^\\S\\n]*(.*)$`, 'm');
+  const re = new RegExp(fieldLinePattern(field) + '[^\\S\\n]*(.*)$', 'm');
   const m = clean.match(re);
   return m ? m[1].trim().replace(/^\*+|\*+$/g, '').trim() : '';
 }
@@ -164,8 +184,7 @@ export function fieldValue(body, field) {
  */
 export function fieldCount(body, field) {
   const clean = cleanBody(body);
-  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`, 'gm');
+  const re = new RegExp(fieldLinePattern(field), 'gm');
   return (clean.match(re) || []).length;
 }
 
@@ -235,10 +254,7 @@ export function canonicalRole(raw) {
 export function fieldBlockShapeProblems(body) {
   const clean = cleanBody(body);
   const lines = clean.split('\n');
-  const fieldRe = (field) => {
-    const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`);
-  };
+  const fieldRe = (field) => new RegExp(fieldLinePattern(field));
   // **五欄必須在說明的最前面**（r7 定案的第二道白名單）。
   // r6–r7 的旁路（fenced code、跨行 code span、fence 長度細節、清單容器、raw HTML <pre>）
   // 有一個共同前提：五欄**前面**可以放任意內容——語境開啟符都是放在前面才生效的。
