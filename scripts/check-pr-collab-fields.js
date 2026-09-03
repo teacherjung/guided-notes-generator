@@ -93,9 +93,11 @@ export function cleanBody(body) {
   //    檢查文本刪掉了渲染文本裡真正生效的東西。GFM 的定義：內文不以 `>` 或 `->` 開頭、
   //    不含 `--`、不以 `-` 結尾。不合格的一律**保留原文**（fail-closed）：
   //    保留後 `<` 在欄位行是禁字、在前導區是非法前導，兩邊都擋。
+  // 替換**保持行數**（r12）：跨行註解若縮成一個佔位，行號映射就斷了——
+  // 後面的模稜檢測要拿「原始行」對照「清理行」，行數不一致整個對不上。
   const stripped = masked.replace(/<!--([\s\S]*?)-->/g, (whole, text) => {
     const legal = !/^(>|->)/.test(text) && !text.includes('--') && !/-$/.test(text);
-    return legal ? '\x01' : whole;
+    return legal ? whole.split('\n').map(() => '\x01').join('\n') : whole;
   });
   return stripped.split('\n').map((l) => (/^[\s\x01]*$/.test(l) ? '' : l)).join('\n');
 }
@@ -245,6 +247,21 @@ export function fieldBlockShapeProblems(body) {
     break;
   }
   if (firstIdx === -1) return [];  // 整份空＝由「缺欄」檢查去報
+  // **前導區的 code／註解記號重疊＝模稜，直接退回**（r12 fail-closed）。
+  // 實測：`<!-- \x60-->\x60<details> -->` ——原文裡 `<!--` 先開始、反引號不是 code span，
+  // 但清理器先遮 code span、再在**遮蔽後**的文本上判註解合法性，偽註解就被判成合法。
+  // 依 GFM 優先序做單遍解析＝重寫 renderer（r5 已認過這條路不走）；
+  // 兩種記號在前導區重疊的正當用法不存在，整類直接退回，錯誤訊息指路。
+  // 範圍＝原始文本的第 0 行到第五欄行（所有替換保行數，行號可直接對照）。
+  const rawLines = normalizeEols(body).split('\n');
+  const prelude = rawLines.slice(0, firstIdx + REQUIRED_FIELDS.length);
+  const hasTick = prelude.some((l) => l.includes('\u0060'));
+  const hasComment = prelude.some((l) => l.includes('<!--') || l.includes('-->'));
+  if (hasTick && hasComment) {
+    return ['PR 說明開頭（協作欄位之前與五欄行）同時出現反引號與 HTML 註解記號——'
+      + '這兩種記號重疊時，機器與 GitHub 的解讀可能不一致，一律退回。'
+      + '反引號與註解都請寫在五欄之後的說明區。'];
+  }
   if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
     return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
       + `實際的第一行是「${lines[firstIdx].trim().slice(0, 40).replace(/\x00/g, '（程式碼區塊）')}」`
