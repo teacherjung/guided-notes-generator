@@ -97,7 +97,7 @@ export function isIndentedCodeLine(line) {
     else if (ch === '\t') col += 4 - (col % 4);
     else break;
   }
-  return col >= 4 && line.trim() !== '';
+  return col >= 4 && !isBlankLine(line);   // 空的判定共用 isBlankLine（r28：三處歸一）
 }
 
 export function cleanBody(body) {
@@ -130,7 +130,9 @@ export function cleanBody(body) {
     const legal = !/^(>|->)/.test(text) && !text.includes('--') && !/-$/.test(text);
     return legal ? whole.split('\n').map(() => '\x01').join('\n') : whole;
   });
-  return stripped.split('\n').map((l) => (/^[\s\x01]*$/.test(l) ? '' : l)).join('\n');
+  // 整行折疊的「空」也走 isBlankLine 的定義（r28）：\s 會把 U+00A0 等折掉，
+  // 與 isBlankLine 分岔——只認半形空格與註解佔位。
+  return stripped.split('\n').map((l) => (/^[ \x01]*$/.test(l) ? '' : l)).join('\n');
 }
 
 /** 五個必填欄位。**這份清單是單一真相**——`.github/pull_request_template.md` 照它。 */
