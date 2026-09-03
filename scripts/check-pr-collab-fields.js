@@ -231,14 +231,14 @@ export function probeNormalize(v) {
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
-  // 裝飾剝除的**唯一**站（r16 立、r17 修順序）。三條規則，每條都是實測假綠換來的：
-  // ①只剝「成對、包住整個值」的**ASCII** delimiter（`**`／`__`／`*`／`_`，可巢狀）——
-  //   剝除在 probeNormalize **之前**做：NFKD 先跑會把全形 ＊＊ 折成 ASCII，
-  //   「＊＊Claude＊＊」（渲染上保留全形星號）就被當成合法粗體（r17）。
-  // ②層間**不 trim**：GitHub 的強調 delimiter 內側不能接空白，「** Claude **」
-  //   不是粗體、渲染保留星號——層間 trim 會把它洗成合法（r17）。
-  // ③probeNormalize 放最後、之後不再 trim，直接精確比對。
-  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）照舊不剝（r16）；反引號、波浪號不剝（r6）。
+  // 裝飾剝除的**唯一**站（r16 立、r17 修順序、r19 收成有限清單、r18 廢折疊）。
+  // 現行規則，每條都是實測假綠換來的：
+  // ①wrapper＝有限清單**一次匹配**（*／**／***／_／__ 同種字元一層；r19：迭代剝
+  //   任意巢狀會把 GFM 不成立的交錯寫法 `_*_*Claude*_*_` 也剝乾淨）。
+  // ②不 trim 內側（r17：「** Claude **」不是粗體）；只認 ASCII delimiter
+  //   （r17：NFKD 先跑會把全形 ＊＊ 折成合法粗體）。
+  // ③剝完後**嚴格 ASCII 比對、不做任何折疊**（r18：NFKD＋去記號在接受方向是漂白機）。
+  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）不剝（r16）；反引號、波浪號不剝（r6）。
   // wrapper 是**有限清單、一次匹配**（r19）：迭代剝「任意巢狀」讓接受集合無限，
   // 且交錯巢狀（`_*_*Claude*_*_`）在 GFM 根本不成立強調、渲染保留星號——照剝＝假綠。
   // 只接受同種字元的一層 delimiter：*／**／***／_／__（GFM 的斜／粗／粗斜），
