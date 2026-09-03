@@ -245,7 +245,13 @@ export function canonicalRole(raw) {
     if (!m) break;
     bare = m[2];
   }
-  bare = probeNormalize(bare);
+  // **嚴格 ASCII 直接比對，不再折疊**（r18）：probeNormalize 的 NFKD＋去記號原是
+  // 「把藏起來的字元折出來抓多角色」的防禦，用在「接受單一角色」方向卻變成漂白機——
+  // Ｃｌａｕｄｅ（全形）、Cláude（重音）、𝐂𝐥𝐚𝐮𝐝𝐞（數學字母）、刪除線組合字、
+  // 雙向控制碼，渲染上全部保留字形，折疊後卻都變成合法 Claude（r18 實測五個假綠）。
+  // fail-closed：剝完 delimiter 後，值必須是純 ASCII 字母、恰好等於某一個角色名；
+  // 任何額外 Unicode＝看不出是誰（想打全形的人，錯誤訊息會指路改半形）。
+  if (!/^[A-Za-z]+$/.test(bare)) return null;
   const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
   return hit.length === 1 ? hit[0] : null;
 }
