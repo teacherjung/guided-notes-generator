@@ -10,6 +10,7 @@
 import difflib
 import re
 import sys
+import unicodedata
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -39,10 +40,10 @@ def declared_originals(part_c):
 
 
 def same_text(recovered, declared):
-    """精確相等，**不 strip**（Codex PR#2 r3：兩側 strip 讓「bar\\n」對上「bar」——
-    S 版把換行連同下一行吞掉、只申報那一行文字，照樣全過）。撈回的原文是 T 版的精確子字串，
-    Part C 的申報欄放不下換行；任何一個字元不同＝不同構，退回去對齊。"""
-    return "\n" not in recovered and recovered == declared
+    """精確相等，**不 strip**（r3：兩側 strip 讓「bar\\n」對上「bar」）。
+    跨行原文（B2／B5 的整塊解答本來就是一個空）在 Part C 用 ⏎ 編碼換行（r7：一律禁換行
+    會把正確的多行挖空全擋掉）——解碼後仍須逐字元相等，吞了多餘的行照樣不符。"""
+    return recovered == declared.replace("⏎", "\n")
 
 
 def split_parts(text):
@@ -107,8 +108,10 @@ def main():
     # 「第 n 頁」＋任何橫線類字元（ASCII 或全形）的行，就是分頁標記的嘗試——
     # 不精確就退回，**不 strip**（Codex PR#2 r6：行首多一格空白被 strip 洗掉、
     # 全形橫線又不在 ASCII 橫線集裡，兩種都溜過）。
-    LOOSE = re.compile(r"^(?=.*第\s*\d+\s*頁)(?=.*[-‐‑‒–—―－]).*$", re.M)
-    malformed = [l for l in LOOSE.findall(T + "\n" + S) if not PAGE.fullmatch(l)]
+    # 橫線類字元改按 Unicode 一般類別 Pd 判定（r7：列舉八種被 U+FE58 穿過——列舉補不完）
+    def dashy(line):
+        return re.search(r"第\s*\d+\s*頁", line) and any(unicodedata.category(c) == "Pd" for c in line)
+    malformed = [l for l in (T + "\n" + S).splitlines() if dashy(l) and not PAGE.fullmatch(l)]
     if malformed:
         bad(f"有 {len(malformed)} 行像分頁標記但不是精確的 `--- 第 n 頁 ---`：{malformed[:3]}")
     if tp == sp and tp:

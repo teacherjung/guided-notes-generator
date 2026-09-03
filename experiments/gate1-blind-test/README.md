@@ -88,7 +88,7 @@ python3 experiments/gate1-blind-test/check-output.py experiments/gate1-blind-tes
    沒過就把報告貼回去要 Grok 重做——格式沒過就不該佔用 William 的紅筆時間。
 
 4. William 紅筆：`cp experiments/gate1-blind-test/grading-sheet.md experiments/gate1-blind-test/run/grading-filled.md`，
-   **先填完整個第 0 節、再看輸出**（看完才訂門檻＝沒有門檻）——第 0 節裡的 **0-E 應挖點總清單**
+   **先填第 0 節的 0-A／0-B／0-E、再看輸出**（看完才訂門檻＝沒有門檻；執行紀錄在附錄、事後填）——第 0 節裡的 **0-E 應挖點總清單**
    要對著課本頁建、並記下建完時間，**這個時間必須早於打開任何一份輸出**：清單是 P4 的分母，
    看過輸出再建就被污染了（Codex PR#2 r3 抓到原本步驟順序做不到這件事）。
    ⚠️ 第一輪是**校準輪**：只下「可測／不可測」，及格線第二輪起生效——P1–P5 是全新定義的指標，

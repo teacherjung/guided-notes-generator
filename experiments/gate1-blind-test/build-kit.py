@@ -152,14 +152,28 @@ def main():
                               text=True).stdout.strip()[:12] or "（不在 git 裡）"
     head = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
                           capture_output=True, text=True).stdout.strip()
-    dirty = bool(subprocess.run(["git", "status", "--porcelain", "--", str(rules_path),
-                                 str(HERE / "prompt-template.md")],
-                                capture_output=True, text=True).stdout.strip())
+    # 可重現性判定（Codex PR#2 r7）：①每個輸入檔都要在版控內——--rules 指到 ignored
+    #    或 repo 外的檔案時，git status 印不出東西、看起來像乾淨 HEAD，數字就錯綁版本
+    #    ②組裝腳本自己也算輸入 ③git 指令的退出碼要看，不能只讀 stdout。
+    inputs = [rules_path, HERE / "prompt-template.md", Path(__file__).resolve()]
+    reasons = []
+    for f in inputs:
+        tracked = subprocess.run(["git", "ls-files", "--error-unmatch", str(f)],
+                                 capture_output=True, text=True)
+        if tracked.returncode != 0:
+            reasons.append(f"{f.name} 不在版控內")
+    st = subprocess.run(["git", "status", "--porcelain", "--"] + [str(f) for f in inputs],
+                        capture_output=True, text=True)
+    if st.returncode != 0:
+        reasons.append("git status 失敗")
+    elif st.stdout.strip():
+        reasons.append("輸入檔有未 commit 的改動")
+    dirty = bool(reasons)
     manifest = (
         f"準則檔：{rules_path}\n"
         f"準則內容 hash：{blob(rules_path)}（{n_rules} 條）\n"
         f"考題模板 hash：{blob(HERE / 'prompt-template.md')}\n"
-        f"repo HEAD：{head}{'（工作區有未 commit 的改動，這一輪的數字不可重現）' if dirty else ''}\n"
+        f"repo HEAD：{head}{'（不可重現：' + '；'.join(reasons) + '）' if dirty else ''}\n"
         f"課本範圍：PDF 第 {first}–{body_last} 頁\n")
     (RUN / "kit-manifest.txt").write_text(manifest, encoding="utf-8")
 
