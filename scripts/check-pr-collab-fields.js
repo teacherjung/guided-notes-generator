@@ -239,12 +239,13 @@ export function canonicalRole(raw) {
   //   不是粗體、渲染保留星號——層間 trim 會把它洗成合法（r17）。
   // ③probeNormalize 放最後、之後不再 trim，直接精確比對。
   // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）照舊不剝（r16）；反引號、波浪號不剝（r6）。
+  // wrapper 是**有限清單、一次匹配**（r19）：迭代剝「任意巢狀」讓接受集合無限，
+  // 且交錯巢狀（`_*_*Claude*_*_`）在 GFM 根本不成立強調、渲染保留星號——照剝＝假綠。
+  // 只接受同種字元的一層 delimiter：*／**／***／_／__（GFM 的斜／粗／粗斜），
+  // 混搭與巢狀一律不剝——內容過不了 ASCII 檢查，自然退回。
   let bare = String(raw || '').trim();
-  for (;;) {
-    const m = bare.match(/^(\*\*|__|\*|_)(.+)\1$/);
-    if (!m) break;
-    bare = m[2];
-  }
+  const m = bare.match(/^(\*{1,3}|_{1,2})(.+)\1$/);
+  if (m) bare = m[2];
   // **嚴格 ASCII 直接比對，不再折疊**（r18）：probeNormalize 的 NFKD＋去記號原是
   // 「把藏起來的字元折出來抓多角色」的防禦，用在「接受單一角色」方向卻變成漂白機——
   // Ｃｌａｕｄｅ（全形）、Cláude（重音）、𝐂𝐥𝐚𝐮𝐝𝐞（數學字母）、刪除線組合字、
