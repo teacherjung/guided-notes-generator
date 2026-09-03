@@ -169,7 +169,15 @@ def main():
     elif st.stdout.strip():
         reasons.append("輸入檔有未 commit 的改動")
     dirty = bool(reasons)
+    # 課本來源與切片都記指紋（Codex PR#2 r9）：來源 PDF 被換掉但仍通過標題自檢時，
+    # manifest 若只記準則與模板，跨輪數字會錯綁輸入版本。run/ 在版控外，用 sha256 不用 git。
+    import hashlib
+    def sha256(p):
+        return hashlib.sha256(Path(p).read_bytes()).hexdigest()[:12]
+    body_pdf = RUN / "stewart-15.4-body.pdf"
     manifest = (
+        f"課本來源 sha256：{sha256(TEXTBOOK)}（{TEXTBOOK.name}）\n"
+        f"送出的切片 sha256：{sha256(body_pdf)}（{body_pdf.name}，PDF 第 {first}–{body_last} 頁）\n"
         f"準則檔：{rules_path}\n"
         f"準則內容 hash：{blob(rules_path)}（{n_rules} 條）\n"
         f"考題模板 hash：{blob(HERE / 'prompt-template.md')}\n"

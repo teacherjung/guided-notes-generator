@@ -20,9 +20,10 @@ PAGE = re.compile(r"^--- 第 (\d+) 頁 ---$", re.M)   # 提示詞要求精確形
 
 
 def norm(s):
-    # 嚴格（Codex PR#2 r1）：宣稱「逐字元同構」就不能折疊縮排與空白——
-    # 只剝每行尾端的不可見空白，其餘一字不動。
-    return "\n".join(line.rstrip() for line in s.splitlines()).strip("\n")
+    # 真正逐字元（r1 收縮排、r9 收行尾）：行尾空白也不剝——兩個尾隨空格在 Markdown 是
+    # 硬換行語意，剝掉會讓「--- 第 1 頁 ---  」這種帶尾空白的標記被判精確、T/S 差異假綠。
+    # 只做行尾符統一與首尾空行修剪。
+    return s.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
 
 
 def declared_originals(part_c):
@@ -187,7 +188,8 @@ def main():
 
     # 4. 數量與比例（Part D 是 Grok 自稱的，這裡是實測的）
     if recovered:
-        blank_chars = sum(len(g) for _, g in recovered)
+        # 分子分母同一算法（r9：分子含換行與空白、分母不含，多行挖空可算出 >100%）
+        blank_chars = sum(len(re.sub(r"\s", "", g)) for _, g in recovered)
         body_chars = len(re.sub(r"\s", "", PAGE.sub("", T)))
         out.append("")
         out.append(f"實測：挖空 {len(nums)} 個／T 版正文 {body_chars} 字"
