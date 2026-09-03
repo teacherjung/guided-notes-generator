@@ -25,8 +25,10 @@ import { gitEnv } from '../lib/git-env.js';
 
 /**
  * ⚠️ **本檔 2026-09-01 自 teaching-videos repo 移植**（該檔又源自理財 webapp，2026-08-25 分家時搬過去）。
- *    本專案只改了兩處：**角色表加 Grok**、檔頭這段實況說明。其餘一字未動——
- *    底下每一條註解都對應理財 webapp 的一次真實事故，重寫會讓教訓失去出處。
+ *    移植當下只改了角色表加 Grok；此後經本 repo PR #1 的 29 輪審查大幅演進
+ *    （形狀白名單、前導字元白名單、嚴格 ASCII 角色比對、唯一定義群——沿革見各函式
+ *    docstring 與 git log），「其餘一字未動」已不成立（Grok 掃 #6 抓到宣稱過期）。
+ *    仍然成立的是：**webapp 事故對應的註解保留原文**——重寫會讓教訓失去出處。
  *    以下註解提到的考題檔
  *    （`test/…`）、其他 `scripts/check-*.js`（如 `check-pr-merge-gate.js`）與 PR 編號
  *    **都在 webapp、不在本 repo**——本 repo 沒有自動考題，
@@ -43,6 +45,98 @@ import { gitEnv } from '../lib/git-env.js';
  */
 export const MERGE_GATE = { name: '協作欄位', why: 'PR 說明五欄齊全且實作者 ≠ 獨立審查者' };
 
+/**
+ * 行尾正規化：\r\n、裸 \r、U+2028、U+2029、U+0085 一律折成 \n（r5 High②）。
+ * 不折的話：regex 的 m-flag 把 U+2028 當行尾（值抓得乾淨），split('\n') 卻不切它——
+ * 兩套「行」的定義不一致，黏在 U+2028 後面的內容就從掃描縫隙溜過去。
+ * 所有讀 body 的函式一律先過這裡，讓全檔只有一種「行」。
+ * @param {string} s @returns {string}
+ */
+export function normalizeEols(s) {
+  return String(s || '').replace(/\r\n?|[\u2028\u2029\u0085]/g, '\n');
+}
+
+/**
+ * 統一的前處理管線（r6 定案）：行尾正規化 → **遮蔽程式碼區塊與行內 code** → 剝 HTML 註解。
+ *
+ * 為什麼要遮蔽（Codex r6 兩條 High）：
+ * ①五欄整份放進 fenced code block 或縮排四格——GitHub 渲染成**程式碼範例**，
+ *   不是正式欄位，但逐行掃描照樣命中＝範例滿足了 required check。
+ * ②行內 code 裡的 `<!-- -->` 在渲染上**看得見**，全域剝註解卻把它當隱形註解刪掉——
+ *   「讀者看得到的加註」被機器當不存在。
+ * 兩條的共同根因：剝註解／掃欄位發生在理解 markdown 語境之前。修法＝先把 code 語境
+ * 整塊換成佔位字元（\x00），再做其他處理——佔位行不可能匹配欄位，也不可能是註解邊界。
+ * 縮排 code 的判定從寬（行首 ≥4 空白即遮）：正常模板五欄零縮排，手動縮排四格填欄位
+ * 會被形狀檢查退回並指路模板，是可接受的代價。
+ *
+ * @param {string} body @returns {string}
+ */
+/**
+ * 縮排 code 行的**唯一**判定（r14）：行首 ≥4 空白或 tab、且含非空白內容。
+ * r14 實測：cleanBody 與前導檢測各寫一份縮排判定，一份看行首、一份多要求緊接非空白，
+ * 「tab＋空白＋內容」的行被 cleanBody 遮蔽、卻不被前導檢測禁——兩套判定的縫隙就是洞。
+ * 同一個概念只准有一個定義（本檔的老教訓：兩套「行」的定義不一致時，r5 已經栽過一次）。
+ * @param {string} line @returns {boolean}
+ */
+/**
+ * 「空行」的**唯一**定義（r27）：只有半形空格（或什麼都沒有）才算空。
+ * JS 的 trim() 認 U+00A0、全形空白等一大票字元是空白，GitHub 卻把 U+00A0 行
+ * 渲染成實質段落——「空行」也是兩套定義的老病（r5 行、r14 縮排、r27 空行，同族第三隻）。
+ * @param {string} line @returns {boolean}
+ */
+export function isBlankLine(line) {
+  return /^ *$/.test(line);
+}
+
+export function isIndentedCodeLine(line) {
+  // CommonMark 的縮排定義是「展開 tab 後 ≥4 列」：tab 推進到下一個 4 的倍數邊界。
+  // r15 抓到「1 空格＋tab」（＝1+3＝4 列）不被舊的字面判定（{4,}空白或行首 tab）涵蓋
+  // ——當時靠其他前導檢查擋住、未成假綠，但「所有縮排形式由同一定義涵蓋」要成立，
+  // 判定就要照 CommonMark 的列計算，不是照字元樣式列舉。
+  let col = 0;
+  for (const ch of line) {
+    if (ch === ' ') col += 1;
+    else if (ch === '\t') col += 4 - (col % 4);
+    else break;
+  }
+  return col >= 4 && !isBlankLine(line);   // 空的判定共用 isBlankLine（r28：三處歸一）
+}
+
+export function cleanBody(body) {
+  const lines = normalizeEols(body).split('\n');
+  let fence = '';   // 目前所在的圍欄記號（'`' 或 '~'），空字串＝不在圍欄裡
+  const masked = lines.map((line) => {
+    const open = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    if (fence) {
+      if (open && open[1][0] === fence) fence = '';
+      return '\x00';
+    }
+    if (open) { fence = open[1][0]; return '\x00'; }
+    if (isIndentedCodeLine(line)) return '\x00';             // 縮排 code（唯一判定）
+    return line.replace(/`[^`\n]*`/g, '\x00');              // 行內 code span
+  }).join('\n');
+  // 註解**換佔位符，不刪除**（r10）：刪除會把註解兩側的文字拼接起來——
+  // `-<!--x--> **實作者**：…` 刪完變成完美的 `- **實作者**：…`，檢查器看到合法清單、
+  // GitHub 渲染的卻是段落（`-` 後緊接註解不是清單標記）。佔位符讓拼接不可能發生。
+  // ⚠️ 註解用 \x01、code 遮蔽用 \x00，**兩種佔位不可混**：整行註解（模板頂部的合法
+  // 用法）視同空行、可當前導略過；整行 code 遮蔽必須保持「非法前導」身分——
+  // 第一版把兩者都當空行，fence 前導保護當場被自己的測試抓到拆掉。
+  // ⚠️ 只有 **GFM 認定合法**的註解才換佔位（r11）：`<!--><details>-->` 這種偽註解
+  //    GFM 不當註解、照渲染出其中的標籤，寬鬆 regex 卻把它整段當註解抹成空白——
+  //    檢查文本刪掉了渲染文本裡真正生效的東西。GFM 的定義：內文不以 `>` 或 `->` 開頭、
+  //    不含 `--`、不以 `-` 結尾。不合格的一律**保留原文**（fail-closed）：
+  //    保留後 `<` 在欄位行是禁字、在前導區是非法前導，兩邊都擋。
+  // 替換**保持行數**（r12）：跨行註解若縮成一個佔位，行號映射就斷了——
+  // 後面的模稜檢測要拿「原始行」對照「清理行」，行數不一致整個對不上。
+  const stripped = masked.replace(/<!--([\s\S]*?)-->/g, (whole, text) => {
+    const legal = !/^(>|->)/.test(text) && !text.includes('--') && !/-$/.test(text);
+    return legal ? whole.split('\n').map(() => '\x01').join('\n') : whole;
+  });
+  // 整行折疊的「空」也走 isBlankLine 的定義（r28）：\s 會把 U+00A0 等折掉，
+  // 與 isBlankLine 分岔——只認半形空格與註解佔位。
+  return stripped.split('\n').map((l) => (/^[ \x01]*$/.test(l) ? '' : l)).join('\n');
+}
+
 /** 五個必填欄位。**這份清單是單一真相**——`.github/pull_request_template.md` 照它。 */
 export const REQUIRED_FIELDS = [
   '實作者',
@@ -52,10 +146,25 @@ export const REQUIRED_FIELDS = [
   '這支若完全失敗，最糟失去什麼',
 ];
 
-/** 合法的角色名（實作者／審查者只能是這三個之一）。 */
-// ⚠️ 本專案（guided-notes-generator）的分工與 webapp／影片線不同：**Grok 實作、Codex 複審、Claude 最終掃描**，
-//    所以角色表多一個 Grok。改這份清單＝改這道閘認得誰，PR 模板的填寫說明要同步。
+/** 合法的角色名（實作者／審查者只能是本清單之一；數目刻意不寫進句子——寫死的數字自己會漂，r16 抓到一次）。 */
+// ⚠️ 角色表比 webapp 多一個 Grok（本專案把它列為合法角色）。分工現況見 CLAUDE.md「分工」節——
+//    閘只守「實作者≠審查者」這條不變量、不記分工順序，分工變動不需要動這份清單（r2 之前這裡
+//    抄了一份分工順序，分工一改就變成過期複本——會漂的不是規則，是複本）。
+//    改這份清單＝改這道閘認得誰，PR 模板的填寫說明要同步。
 export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
+
+/**
+ * 欄位行核心 pattern 的**唯一**來源（r15）：fieldValue／fieldCount／形狀檢查原本
+ * 各寫一份等價 regex——同一概念三份定義，就是 r5／r14 那種縫隙的溫床。
+ * 這裡只定義「這一行提到某欄位」的寬鬆核心（bullet 可選、粗體可選）；
+ * 「這一行是**合法**的欄位行」（精確「- 」前綴、行內禁字）是另一個概念，
+ * 由形狀檢查額外把關，不屬於本工廠。
+ * @param {string} field @returns {string} regex 源字串（不含 flags 與行尾捕獲）
+ */
+export function fieldLinePattern(field) {
+  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return `^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：]`;
+}
 
 /**
  * 從 PR 說明裡抽出某一欄的值。
@@ -67,7 +176,7 @@ export const ROLES = ['Claude', 'Codex', 'Grok', 'William'];
  * @param {string} body @param {string} field @returns {string}
  */
 export function fieldValue(body, field) {
-  const clean = String(body || '').replace(/<!--[\s\S]*?-->/g, '');
+  const clean = cleanBody(body);
   // 形如：`- **實作者**：Claude` ／ `**實作者**: Claude` ／ `實作者：Claude`
   // ⚠️ 冒號後只准吃**水平空白**（`[^\\S\\n]`），不可用 `\\s`——`\\s` 會吃掉換行，
   //    於是「欄位留空」會抓到**下一行**的內容，空模板看起來像「每一欄都填了」。
@@ -75,12 +184,25 @@ export function fieldValue(body, field) {
   // ⚠️ **必須錨定在行首**（Codex #379 r2 High①）：不錨定的話 `- **非實作者**：Claude`
   //    也會命中——整份 PR 說明可以一個真欄位都沒有，卻被判「五欄齊全」＝機械閘 fail-open。
   //    允許的形狀：行首可有 `-`／`*` 項目符號與空白，欄名可被 `**`／`__` 包住，然後才是冒號。
-  const esc = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');   // 欄名含「，」等字元，仍統一跳脫
-  //   ⚠️ 也接受有序清單 `1. **實作者**：`（Codex #379 r3 記錄項）——**噪音型誤擋會讓人乾脆繞過這道閘**，
-  //   而「用 1. 而不是 -」顯然不是想規避什麼。引言符號 `>` 刻意**不接受**：那是引用範例，不該滿足閘。
-  const re = new RegExp(`^[^\\S\\n]*(?:(?:[-*+]|\\d+[.)])[^\\S\\n]*)?(?:\\*\\*|__)?${esc}(?:\\*\\*|__)?[^\\S\\n]*[:：][^\\S\\n]*(.*)$`, 'm');
+  const re = new RegExp(fieldLinePattern(field) + '[^\\S\\n]*(.*)$', 'm');
   const m = clean.match(re);
-  return m ? m[1].trim().replace(/^\*+|\*+$/g, '').trim() : '';
+  // 只抽取與 trim（r16）：裝飾剝除統一由 canonicalRole 處理——
+  // 這裡先剝首尾星號、那裡再剝一次，兩處各剝一半＝`*Claude` 這種**不成對**的
+  // 星號被分兩站洗成乾淨的 Claude，顯示與判定不一致。
+  return m ? m[1].trim() : '';
+}
+
+/**
+ * 同一欄位在說明裡出現幾次。
+ * ⚠️ **每個必填欄位必須恰好出現一次**（本 repo r1 High②）：只讀第一個命中的話，
+ *    「實作者：Claude／實作者：Codex／獨立審查者：Codex」會被判成 Claude 實作、Codex 審——
+ *    自審藏在第二個欄位裡，機器只看見第一個。基準版本同理（兩個 SHA 各指一版＝歧義）。
+ * @param {string} body @param {string} field @returns {number}
+ */
+export function fieldCount(body, field) {
+  const clean = cleanBody(body);
+  const re = new RegExp(fieldLinePattern(field), 'gm');
+  return (clean.match(re) || []).length;
 }
 
 /**
@@ -104,44 +226,163 @@ export function probeNormalize(v) {
 }
 
 /**
- * 把欄位值正規化成**剛好一個**角色；看不出來或不只一個就回 `null`。
+ * 把欄位值正規化成**剛好一個**角色；對不上就回 `null`。
  *
- * ⚠️ 這裡刻意**不用 `includes`**（Codex #379 r1 High①）：`NotClaude` 含有 `Claude`、
- *    `Claude and Codex` 也含有 `Claude`——用 substring 判斷等於把 fail-open 寫進閘裡。
- *    先剝掉 markdown 粗體、反引號、括號註記與空白，再要求**全等**於某一個角色。
+ * ⚠️ **嚴格模式（r3 定案）**：剝掉 markdown 粗體／斜體裝飾與頭尾空白後，
+ *    值必須**精確等於**某一個角色名（大小寫不計）。**不接受任何加註**——括號、斜線、
+ *    描述文字，一律「看不出是誰」。
+ *
+ *    這是三輪審查打同一個洞之後的關門。演進全記在這裡，因為每一步都是實測繞過：
+ *    r1 前：括號內掃角色 →「Co dex」一個空格穿過。
+ *    r1：拔空白與 `-_.` 再掃 → `Co/dex`、全形斜線、`（Co）（dex）` 穿過（分隔符列舉不完）。
+ *    r2：整欄拔掉非字母數字、數 distinct 角色 → `Co&#100;ex`、`Co<em>d</em>ex` 穿過——
+ *        機器掃的是 markdown 原始碼，人看的是渲染結果，**兩層永遠可以不一樣**，
+ *        而渲染語意（HTML entity、標籤、連結……）又是一個列舉不完的空間。
+ *    r3 關門：**把加註空間整個關掉**。攻擊面是「加註裡可以藏東西」，那就不給加註。
+ *    「Claude（已看過）」這類無害寫法一併被拒是刻意的代價——說明寫 PR 描述別處，
+ *    錯誤訊息會講清楚怎麼改。模板填寫說明本來就寫「不接受加註」，閘從此真的執行它。
  *
  * @param {string} raw @returns {string | null}
  */
 export function canonicalRole(raw) {
-  // ⚠️ **正規化要做在最前面、只做一次**（Codex #379 r3 Medium）：
-  //    r2 版只把外層正規化、括號內的檢查用原字串，於是 `Claude（Ｃｏｄｅｘ）`（全形）與
-  //    `Claude（Co\u200bdex）`（零寬）都溜過去——括號被整段剝掉，剩下乾淨的 `Claude`。
-  //    根因是「同一個字串有兩種形式在流動」。**之後所有判斷都只看正規化後的字串**。
-  const bare = probeNormalize(String(raw || ''))
-    .replace(/[`*_~]/g, '');                    // markdown 裝飾
-  // ⚠️ **混用文字系統＝看不出是誰，fail-closed**（Codex #379 r4 Medium）：
-  //    西里爾 `С`（U+0421）跟拉丁 `C` 在螢幕上長一樣，正規化折不掉——那是**不同的字母**。
-  //    角色名全是拉丁字母；欄位裡出現「拉丁以外的字母混在拉丁詞裡」沒有任何正當理由，
-  //    整欄直接判「看不出是誰」。不做 confusable 對照表（表列不完，同型病第四次）。
-  if (/\p{Script=Latin}/u.test(bare)) {
-    for (const ch of bare) {
-      if (/\p{L}/u.test(ch) && !/\p{Script=Latin}/u.test(ch) && !/\p{Script=Han}/u.test(ch)) return null;
+  // 裝飾剝除的**唯一**站（r16 立、r17 修順序、r19 收成有限清單、r18 廢折疊）。
+  // 現行規則，每條都是實測假綠換來的：
+  // ①wrapper＝有限清單**一次匹配**（*／**／***／_／__ 同種字元一層；r19：迭代剝
+  //   任意巢狀會把 GFM 不成立的交錯寫法 `_*_*Claude*_*_` 也剝乾淨）。
+  // ②不 trim 內側（r17：「** Claude **」不是粗體）；只認 ASCII delimiter
+  //   （r17：NFKD 先跑會把全形 ＊＊ 折成合法粗體）。
+  // ③剝完後**嚴格 ASCII 比對、不做任何折疊**（r18：NFKD＋去記號在接受方向是漂白機）。
+  // 不成對（`*Claude`）或嵌在字中（`Cl_aude`）不剝（r16）；反引號、波浪號不剝（r6）。
+  // wrapper 是**有限清單、一次匹配**（r19）：迭代剝「任意巢狀」讓接受集合無限，
+  // 且交錯巢狀（`_*_*Claude*_*_`）在 GFM 根本不成立強調、渲染保留星號——照剝＝假綠。
+  // 只接受同種字元的一層 delimiter：*／**／***／_／__（GFM 的斜／粗／粗斜），
+  // 混搭與巢狀一律不剝——內容過不了 ASCII 檢查，自然退回。
+  let bare = String(raw || '').trim();
+  const m = bare.match(/^(\*{1,3}|_{1,2})(.+)\1$/);
+  if (m) bare = m[2];
+  // **嚴格 ASCII 直接比對，不再折疊**（r18）：probeNormalize 的 NFKD＋去記號原是
+  // 「把藏起來的字元折出來抓多角色」的防禦，用在「接受單一角色」方向卻變成漂白機——
+  // Ｃｌａｕｄｅ（全形）、Cláude（重音）、𝐂𝐥𝐚𝐮𝐝𝐞（數學字母）、刪除線組合字、
+  // 雙向控制碼，渲染上全部保留字形，折疊後卻都變成合法 Claude（r18 實測五個假綠）。
+  // fail-closed：剝完 delimiter 後，值必須是純 ASCII 字母、恰好等於某一個角色名；
+  // 任何額外 Unicode＝看不出是誰（想打全形的人，錯誤訊息會指路改半形）。
+  if (!/^[A-Za-z]+$/.test(bare)) return null;
+  const hit = ROLES.filter((r) => r.toLowerCase() === bare.toLowerCase());
+  return hit.length === 1 ? hit[0] : null;
+}
+
+/**
+ * 協作欄位**五欄必須是連續五行、依模板順序**（r5 定案的白名單關門）。
+ *
+ * 沿革——這是「角色欄加註」這個洞的第六種修法，前五種全是黑名單、全被實測繞過：
+ * 同行括號（r1 前）→ 分隔符拆字（r1）→ HTML entity／標籤（r2–r3）→ 清單續行（r4）→
+ * 空行段落／巢狀子清單／U+2028 行分隔（r5）。markdown「什麼會被渲染進同一格」的語意
+ * 是列舉不完的，判斷「什麼算續行」就是在重寫 renderer。
+ * 白名單反過來：不判斷壞東西長什麼樣，要求好東西只有一種形狀——五欄連續五行、
+ * 順序照模板、行間零容忍。任何黏進來的內容都會讓「下一行不是預期欄位」而報錯。
+ * 第五欄（自由文字）之後的行不管：閘不從那裡讀任何判定，多行說明是正常需求。
+ *
+ * @param {string} body @returns {string[]}
+ */
+export function fieldBlockShapeProblems(body) {
+  const clean = cleanBody(body);
+  const lines = clean.split('\n');
+  const fieldRe = (field) => new RegExp(fieldLinePattern(field));
+  // **五欄必須在說明的最前面**（r7 定案的第二道白名單）。
+  // r6–r7 的旁路（fenced code、跨行 code span、fence 長度細節、清單容器、raw HTML <pre>）
+  // 有一個共同前提：五欄**前面**可以放任意內容——語境開啟符都是放在前面才生效的。
+  // 與其把 GFM 的語境規則一條條搬進來（跨行 span、fence 長度、closing 尾端限制……
+  // 每一條都是 spec 的真實細節，手寫模擬就是在重寫 renderer），直接拿掉那個前提：
+  // 剝註解、遮蔽之後，第一個實質行只能是「## 協作欄位」標題或第一欄本身，
+  // 五欄之前沒有任何餘地放語境開啟符。被遮蔽的行（\x00）也算不合法前導——
+  // code 區塊擋在五欄前面同樣改變語境，一樣擋。
+  let firstIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (isBlankLine(l)) continue;                               // 空行可略過（唯一定義）
+    // 標題例外必須**整行精確匹配**（r8）：`##協作欄位 <details>` 既不是合法 ATX 標題
+    // （# 後要有空白），行尾又帶著語境開啟符——只匹配前綴會把它當標題放過。
+    if (/^#{1,6}[ \t]+協作欄位[ \t]*$/.test(l)) continue;
+    firstIdx = i;
+    break;
+  }
+  if (firstIdx === -1) return [];  // 整份空＝由「缺欄」檢查去報
+  // **前導區禁止一切 code 類記號**（r12 立、r13 推廣並收緊）。
+  // r12 實測：反引號吃掉原始註解的結尾，遮蔽後偽註解變合法；
+  // r13 實測：縮排 code 與 ~~~ fence 同型——**任何**會被 code 階段遮蔽的形式
+  // 都能改寫註解的邊界。與其列舉「哪些重疊算模稜」（列舉補不完），
+  // 直接禁全類：前導區的四種合法狀態（空行／無 code 記號的整行合法註解／
+  // 精確標題行／精確五欄行）沒有一種用得到 code 記號，單獨出現也沒有正當用法。
+  // 範圍＝原始文本的第 0 行到第五欄行（所有替換保行數，行號可直接對照）。
+  const rawLines = normalizeEols(body).split('\n');
+  const prelude = rawLines.slice(0, firstIdx + REQUIRED_FIELDS.length);
+  // r22 補 `&`：HTML character reference（&#x36;… 渲染成 6f29509、&nbsp; 渲染成空白、
+  // &#32773; 渲染成「者」）讓「機器讀的原文」與「讀者看的渲染」在前導區分岔——
+  // 實作 entity 解碼＝又一個列舉不完的空間（named／decimal／hex／大小寫），
+  // 照 r18 的哲學：`&` 在前導區沒有正當用途，列為語境開啟符直接退回。
+  // r23 補：`~` 從只攔 ~~~ 擴成整字元——`~~9a7741f~~` 的刪除線包住 SHA，
+  // 角色欄的 ASCII 檢查管不到基準版本與自由欄，渲染上是被劃掉的字、機器照樣抽出有效 hex。
+  // `~` 在前導區同樣沒有正當用途，整字元退回。
+  // r24 補 `$`：GitHub 的 MathJax 擴展（$…$）不在 GFM 標準內——$\phantom{真SHA}假SHA$
+  // 渲染上隱藏真值顯示假值。窮舉的母集是「GitHub 實際渲染的一切」，不只 GFM。
+  // **前導區改真正的允許字元白名單**（r26 定案）。黑名單走了九輪（code 記號→&→$→
+  // Cf/M…），r26 用 U+2800 盲文空白（So 類，畫面全空）證明：黑名單補不完，
+  // 宣稱「只含合法字元」就要用白名單驗證。允許集＝前導區合法內容的實際需要：
+  // 半形空格、基本 ASCII 可見字元（扣掉語境開啟符 \u0060 ~ & $ < [ \ 與佔位）、
+  // 漢字、常用全形標點。集合外的一切（盲文空白、其他文字系統、emoji、
+  // 全部 Cf/M/So 怪字元）一律退回——正文區不受限。
+  const BANNED_ASCII = /[\u0060~&$<\[\\\x00\x01]/;
+  const ALLOWED = /^[\u0020\u0021-\u007E\p{Script=Han}：、。，；！？「」『』（）《》【】・／—…·]*$/u;
+  // 整行合法註解的豁免**只免註解記號本身**（<、>、!、-）：
+  // 清理後為空＝cleanBody 判定的合法註解行，但那個判定在 masked 文本上做（r12 老課題）
+  // ——跨行「合法」註解內若藏 code 記號，GitHub 的邊界解讀仍會分岔（r12–r15 全族）。
+  // 所以豁免行剝掉註解記號後，其餘字元照白名單驗、縮排照驗；
+  // 非豁免行（偽註解、行內註解、一般行）整行照驗。
+  const badLine = prelude.find((l, i) => {
+    if (isBlankLine(l)) return false;
+    const verifiedComment = isBlankLine(lines[i] ?? '');
+    const probe = verifiedComment ? l.replace(/[<>!\-]/g, '') : l;
+    return BANNED_ASCII.test(probe) || !ALLOWED.test(probe) || isIndentedCodeLine(l);
+  });
+  if (badLine !== undefined) {
+    return [`PR 說明開頭（協作欄位之前與五欄行）含白名單外的字元或語境記號：`
+      + `「${badLine.trim().slice(0, 40)}」——前導區只准漢字、常用標點與基本 ASCII`
+      + '（反引號、~、&、$、<、[、反斜線與任何不可見／特殊字元都不行），'
+      + '其他內容請寫在五欄之後的說明區。'];
+  }
+  if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
+    return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
+      + `實際的第一行是「${lines[firstIdx].trim().slice(0, 40).replace(/\x00/g, '（程式碼區塊）')}」`
+      + '——請照 .github/pull_request_template.md 的順序：五欄在最上、說明寫在五欄之後。'];
+  }
+  const idx = firstIdx;
+  for (let k = 0; k < REQUIRED_FIELDS.length; k++) {
+    const line = lines[idx + k];
+    if (line === undefined || !fieldRe(REQUIRED_FIELDS[k]).test(line)) {
+      return [`協作欄位五欄必須是**連續五行**、依模板順序。第 ${k + 1} 行應為「${REQUIRED_FIELDS[k]}」，`
+        + `實得「${(line ?? '（沒有了）').trim().slice(0, 40)}」——`
+        + '欄位行之間不得有任何續行、空行或其他內容（照 .github/pull_request_template.md 的形狀填）。'];
+    }
+    // 每一欄都必須以**模板的精確「- 」前綴**開頭（r8 要求清單項；r9 收緊為精確前綴）：
+    // 寬鬆接受清單標記變體被實測打穿——十位數字的偽有序標記（GFM 上限九位）讓五行
+    // 併回段落、跨行語法重新獲得吞行力；「- 」後多塞空白則渲染成清單內 code。
+    // 模板就是「- 」，堅持精確前綴的誤擋成本趨近零，變體的驗證成本（縮排、位數、
+    // 標記後空白、tab……）是又一個列舉不完的空間。
+    if (!/^- \S/.test(line)) {
+      return [`「${REQUIRED_FIELDS[k]}」那一行必須以「- 」開頭（一個連字號＋一個空白，`
+        + '零縮排，照 .github/pull_request_template.md 原樣），且緊接欄名，不得多塞空白。'];
+    }
+    // 欄位行內禁止語境開啟符（r8 起；r9 補 `[`）：`<` 開 raw HTML、反引號開（跨行）
+    // code span、`[` 開連結／圖片（`![…](…)` 的吞行力在 r9 被實測）、\x00 是遮蔽產物。
+    // 值需要這些符號時，寫在五欄之後的說明區。
+    const banned = line.match(/[<\`\[\x00\x01&]/);
+    if (banned) {
+      return [`「${REQUIRED_FIELDS[k]}」那一行含「${banned[0] === '\x00' ? '程式碼片段' : banned[0] === '\x01' ? '行內註解' : banned[0]}」`
+        + '——五欄行內不得出現 `<`、反引號、`[` 或程式碼片段（它們會改變後續欄位的渲染語境）。'
+        + '需要這些符號的內容寫在五欄之後的說明區。'];
     }
   }
-  // **括號裡若藏著第二個角色就不算單一角色**（Codex #379 r2 Medium①）：
-  //   「Claude（Codex）」剝掉括號會變成乾淨的 `Claude`，與「獨立審查者：Codex」搭配就整份通過——
-  //   但那個欄位實際上提到了兩個角色，語意上正是「看不出是誰」。
-  for (const inner of bare.match(/\([^)]*\)/g) || []) {
-    // bare 已經過 probeNormalize——括號內的藏字元在這之前就被折掉了（r4 的四個重現都在這裡歸位）
-    if (ROLES.some((r) => new RegExp(r, 'i').test(inner))) return null;
-  }
-  const t = bare
-    .replace(/\([^)]*\)/g, '')                 // 括號註記（「Claude（已看過）」；NFKC 後全形括號已折成半形）
-    .replace(/\s+/g, '')                        // 空白
-    .trim();
-  if (!t) return null;
-  const hit = ROLES.filter((r) => r.toLowerCase() === t.toLowerCase());
-  return hit.length === 1 ? hit[0] : null;      // 不只一個或零個 → 看不出來
+  return [];
 }
 
 /**
@@ -149,12 +390,16 @@ export function canonicalRole(raw) {
  * @param {string} body @returns {string[]}
  */
 export function problemsOf(body) {
-  /** @type {string[]} */ const problems = [];
+  /** @type {string[]} */ const problems = [...fieldBlockShapeProblems(body)];
   /** @type {Record<string,string>} */ const got = {};
   for (const f of REQUIRED_FIELDS) {
+    const n = fieldCount(body, f);
+    if (n > 1) problems.push(`「${f}」出現 ${n} 次——每個必填欄位必須恰好一次，重複的欄位是歧義（自審可以藏在第二個裡）`);
     const v = fieldValue(body, f);
     got[f] = v;
-    if (!v) problems.push(`缺「${f}」`);
+    // ⚠️ 判空要用 probeNormalize 後的值（本 repo r1 Medium①）：單一個 U+200B 零寬空白
+    //    trim() 不會除掉，「視覺上空白的欄位」就會過關——五欄齊全變成假宣稱。
+    if (!probeNormalize(v).trim()) problems.push(`缺「${f}」`);
   }
   const implRaw = got['實作者'];
   const revRaw = got['獨立審查者'];
@@ -170,8 +415,8 @@ export function problemsOf(body) {
   //    現在：剝掉格式與裝飾字之後**必須剛好命中一個角色**，然後比對正規化後的角色。
   for (const [label, raw, role] of [['實作者', implRaw, impl], ['獨立審查者', revRaw, rev]]) {
     if (raw && !role) {
-      problems.push(`「${label}」寫成「${raw}」，必須剛好是 ${ROLES.join('／')} 的其中一個`
-        + '（不接受加註、多人並列、或看不出是誰的寫法）');
+      problems.push(`「${label}」寫成「${raw}」，必須**恰好等於** ${ROLES.join('／')} 的其中一個`
+        + '——不接受任何加註（括號、描述文字都不行；說明請寫在 PR 描述其他地方）');
     }
   }
   // 核心那一條：實作者 ≠ 審查者。寫成同一個人＝違反唯一不變量，這道閘存在的全部理由。
@@ -206,7 +451,10 @@ function fetchPr(pr) {
  * @param {string} body @param {string} head @returns {string[]}
  */
 export function staleBaseProblems(body, head) {
-  const raw = fieldValue(body, '基準版本').replace(/[`*_\s]/g, '');
+  // ⚠️ 不剝分隔符（Grok 掃 #9）：先刪 `*_ 空白再抓 hex，「80 ee738」「80*ee738」會被
+  //    拼接成 head 前綴——顯示值不是 SHA、拼完卻通過。只剝成對 wrapper 由白名單管，
+  //    hex run 在原值上取極大段，被拆開的段各自不足七碼＝讀不出 SHA，照實報錯。
+  const raw = fieldValue(body, '基準版本');
   // ⚠️ **抓「每一個」候選、而且要求全部都對**（Codex #382 r5 Medium）。
   //    第一版只抓第一段十六進位，於是：
   //      ・`d6c4fbd / f76d12b` 通過，反過來寫卻被拒——**結果取決於排列順序**
@@ -230,6 +478,16 @@ export function staleBaseProblems(body, head) {
   return [];
 }
 
+/**
+ * **整條合併閘的唯一組合入口**（r30）：main 與離線探針都呼叫這一個——
+ * 探針原本分別測 problemsOf 與 staleBaseProblems，若 main 日後漏接其中一段，
+ * 探針照綠。共用組合函式後，「涵蓋整條路徑」的宣稱由結構保證。
+ * @param {string} body @param {string} head @returns {string[]}
+ */
+export function gateProblemsOf(body, head) {
+  return [...problemsOf(body), ...staleBaseProblems(body, head)];
+}
+
 /** @param {string[]} argv */
 export function main(argv) {
   const pr = argv[0];
@@ -244,13 +502,13 @@ export function main(argv) {
     console.error(`協作欄位閘 PR #${pr}：查不清楚（${/** @type {any} */ (e)?.message}）——一律當成未通過。`);
     return 2;
   }
-  const problems = [...problemsOf(pull.body), ...staleBaseProblems(pull.body, pull.head)];
+  const problems = gateProblemsOf(pull.body, pull.head);
   if (problems.length === 0) {
     console.log(`協作欄位閘 PR #${pr}：五欄齊全、實作者 ≠ 獨立審查者、基準版本＝目前 head。可繼續合併程序。`);
     return 0;
   }
   console.error(`協作欄位閘 PR #${pr}：**未通過**\n` + problems.map((p) => `  ・${p}`).join('\n')
-    + '\n\n請照 .github/pull_request_template.md 補齊再合併（規則見 AGENTS.md「審查與合併」節）。');
+    + '\n\n請照 .github/pull_request_template.md 補齊再合併（規則見 CLAUDE.md「分工」節）。');
   return 1;
 }
 
