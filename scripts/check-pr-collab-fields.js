@@ -306,10 +306,13 @@ export function fieldBlockShapeProblems(body) {
   // &#32773; 渲染成「者」）讓「機器讀的原文」與「讀者看的渲染」在前導區分岔——
   // 實作 entity 解碼＝又一個列舉不完的空間（named／decimal／hex／大小寫），
   // 照 r18 的哲學：`&` 在前導區沒有正當用途，列為語境開啟符直接退回。
+  // r23 補：`~` 從只攔 ~~~ 擴成整字元——`~~9a7741f~~` 的刪除線包住 SHA，
+  // 角色欄的 ASCII 檢查管不到基準版本與自由欄，渲染上是被劃掉的字、機器照樣抽出有效 hex。
+  // `~` 在前導區同樣沒有正當用途，整字元退回。
   const codeMarked = prelude.find((l) =>
-    l.includes('\u0060') || l.includes('~~~') || l.includes('&') || isIndentedCodeLine(l));
+    l.includes('\u0060') || l.includes('~') || l.includes('&') || isIndentedCodeLine(l));
   if (codeMarked !== undefined) {
-    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~~~、& 或 ≥4 格縮排）：`
+    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~、& 或 ≥4 格縮排）：`
       + `「${codeMarked.trim().slice(0, 40)}」——這些記號會讓機器讀的原文與讀者看的渲染分岔，一律退回。`
       + '程式碼、範例與含 & 的內容請寫在五欄之後的說明區。'];
   }
