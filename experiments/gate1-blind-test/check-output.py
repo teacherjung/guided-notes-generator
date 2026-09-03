@@ -13,14 +13,32 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-BLANK = re.compile(r"【(\d+)】[＿_]{1,}")
+BLANK = re.compile(r"【(\d+)】[＿_]{2,}")   # 至少兩個底線才算空（單一 _ 不算）
 PAGE = re.compile(r"-{2,}\s*第\s*(\d+)\s*頁\s*-{2,}")
 
 
 def norm(s):
-    s = s.replace("　", " ")
-    s = re.sub(r"[ \t]+", " ", s)
-    return "\n".join(line.strip() for line in s.splitlines()).strip()
+    # 嚴格（Codex PR#2 r1）：宣稱「逐字元同構」就不能折疊縮排與空白——
+    # 只剝每行尾端的不可見空白，其餘一字不動。
+    return "\n".join(line.rstrip() for line in s.splitlines()).strip("\n")
+
+
+def declared_originals(part_c):
+    """Part C 表格的「被挖掉的原文」欄，依編號取出。"""
+    found = {}
+    for row in part_c.splitlines():
+        row = row.strip()
+        if not row.startswith("|") or re.match(r"^\|[\s\-:|]+\|$", row):
+            continue
+        cells = [c.strip() for c in row.strip("|").split("|")]
+        if len(cells) >= 3 and cells[0].isdigit():
+            found[int(cells[0])] = cells[2].replace("\\|", "|")
+    return found
+
+
+def squash(s):
+    """比對用：去空白、去 $ 與反引號——原文欄在表格裡難免被改寫這些裝飾。"""
+    return re.sub(r"[\s$`]", "", s)
 
 
 def split_parts(text):
@@ -102,16 +120,24 @@ def main():
         empties = [n for n, g in recovered if not g.strip()]
         if empties:
             bad(f"這些空在 T 版對應到空字串（挖了個寂寞）：{empties}")
-        # 同構比對的已知弱點：萬用字元會把「S 版整段刪掉」也吞進某個空裡，
-        # 於是漏字看起來像挖空。撈回來的原文異常大就是這個徵兆，要人眼確認。
+        # 萬用字元會把「S 版整段刪掉」也吞進某個空裡——漏字看起來像挖空。
+        # 關門（Codex PR#2 r1）：每個空撈回的原文必須**等於 Part C 申報的原文**。
+        # 吞了多餘文字＝撈回的比申報的多＝不符＝不通過；不再用「跨行只警告」放水。
         swallowed = [n for n, g in recovered if PAGE.search(g)]
         if swallowed:
-            bad(f"這些空吃掉了分頁點，S 版八成漏了一整段：{swallowed}")
-        fat = [(n, len(g)) for n, g in recovered
-               if "\n" in g.strip() or len(g) > 200]
-        for n, ln in fat:
-            out.append(f"⚠ 【{n}】撈回 {ln} 字且跨行——可能是真的挖一整段，"
-                       f"也可能是 S 版漏字被當成挖空。這一個要人眼看。")
+            bad(f"這些空吃掉了分頁點，S 版漏了一整段：{swallowed}")
+        declared = declared_originals(parts.get("C", ""))
+        mismatch = []
+        for n, g in recovered:
+            if n not in declared:
+                mismatch.append(f"【{n}】Part C 沒有申報原文")
+            elif squash(g) != squash(declared[n]):
+                mismatch.append(f"【{n}】撈回「{g.strip()[:30]}…」≠ 申報「{declared[n][:30]}…」")
+        if mismatch:
+            bad("挖空原文與 Part C 申報不符（S 版吞了不該刪的字，或清單填錯）：\n      "
+                + "\n      ".join(mismatch[:8]))
+        else:
+            ok("每個空撈回的原文都與 Part C 申報一致")
     elif nums:
         bad("同構失敗：S 版在挖空以外的地方跟 T 版不一樣（改寫／漏行／多行）")
         skeleton = BLANK.sub("", S)
