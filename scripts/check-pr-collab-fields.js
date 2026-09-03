@@ -302,12 +302,16 @@ export function fieldBlockShapeProblems(body) {
   // 範圍＝原始文本的第 0 行到第五欄行（所有替換保行數，行號可直接對照）。
   const rawLines = normalizeEols(body).split('\n');
   const prelude = rawLines.slice(0, firstIdx + REQUIRED_FIELDS.length);
+  // r22 補 `&`：HTML character reference（&#x36;… 渲染成 6f29509、&nbsp; 渲染成空白、
+  // &#32773; 渲染成「者」）讓「機器讀的原文」與「讀者看的渲染」在前導區分岔——
+  // 實作 entity 解碼＝又一個列舉不完的空間（named／decimal／hex／大小寫），
+  // 照 r18 的哲學：`&` 在前導區沒有正當用途，列為語境開啟符直接退回。
   const codeMarked = prelude.find((l) =>
-    l.includes('\u0060') || l.includes('~~~') || isIndentedCodeLine(l));
+    l.includes('\u0060') || l.includes('~~~') || l.includes('&') || isIndentedCodeLine(l));
   if (codeMarked !== undefined) {
-    return [`PR 說明開頭（協作欄位之前與五欄行）出現 code 類記號（反引號、~~~ 或 ≥4 格縮排）：`
-      + `「${codeMarked.trim().slice(0, 40)}」——這些記號會改變前導區的渲染解讀，一律退回。`
-      + '程式碼與範例請寫在五欄之後的說明區。'];
+    return [`PR 說明開頭（協作欄位之前與五欄行）出現語境記號（反引號、~~~、& 或 ≥4 格縮排）：`
+      + `「${codeMarked.trim().slice(0, 40)}」——這些記號會讓機器讀的原文與讀者看的渲染分岔，一律退回。`
+      + '程式碼、範例與含 & 的內容請寫在五欄之後的說明區。'];
   }
   if (!fieldRe(REQUIRED_FIELDS[0]).test(lines[firstIdx])) {
     return [`協作欄位五欄必須放在 PR 說明的**最前面**（前面只准「## 協作欄位」標題與空行），`
@@ -334,7 +338,7 @@ export function fieldBlockShapeProblems(body) {
     // 欄位行內禁止語境開啟符（r8 起；r9 補 `[`）：`<` 開 raw HTML、反引號開（跨行）
     // code span、`[` 開連結／圖片（`![…](…)` 的吞行力在 r9 被實測）、\x00 是遮蔽產物。
     // 值需要這些符號時，寫在五欄之後的說明區。
-    const banned = line.match(/[<\`\[\x00\x01]/);
+    const banned = line.match(/[<\`\[\x00\x01&]/);
     if (banned) {
       return [`「${REQUIRED_FIELDS[k]}」那一行含「${banned[0] === '\x00' ? '程式碼片段' : banned[0] === '\x01' ? '行內註解' : banned[0]}」`
         + '——五欄行內不得出現 `<`、反引號、`[` 或程式碼片段（它們會改變後續欄位的渲染語境）。'
