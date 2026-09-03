@@ -102,12 +102,26 @@ def main():
 
     # 1. 分頁點一致
     tp, sp = PAGE.findall(T), PAGE.findall(S)
+    # 疑似分頁行（有「第 n 頁」＋橫線）卻不是精確形式＝格式違規，不能當普通文字放過
+    # （Codex PR#2 r5：合法與錯誤標記並存時，錯誤的那行被當成一般文字、頁數還報錯）。
+    LOOSE = re.compile(r"^.*-+\s*第\s*\d+\s*頁\s*-+.*$", re.M)
+    malformed = [l for l in LOOSE.findall(T + "\n" + S) if not PAGE.fullmatch(l.strip())]
+    if malformed:
+        bad(f"有 {len(malformed)} 行像分頁標記但不是精確的 `--- 第 n 頁 ---`：{malformed[:3]}")
     if tp == sp and tp:
-        ok(f"分頁點一致：{len(tp)} 頁（{'、'.join(tp)}）")
+        if tp != [str(i) for i in range(1, len(tp) + 1)]:
+            bad(f"頁碼必須從 1 連號且不重複，實得：{'、'.join(tp)}")
+        else:
+            ok(f"分頁點一致：{len(tp)} 頁（{'、'.join(tp)}）")
     elif not tp:
         bad("T 版找不到 `--- 第 n 頁 ---` 分頁點（提示詞硬性規定 3）")
     else:
         bad(f"分頁點不一致：T={tp} vs S={sp}")
+
+    # ── r5 #3：T 版不得含任何挖空標記——T 是完整答案版，出現【n】＿＿就根本沒有答案 ──
+    t_blanks = BLANK.findall(T) + HALF.findall(T)
+    if t_blanks:
+        bad(f"T 版含 {len(t_blanks)} 個挖空標記——T 版必須是完整筆記，不可有【n】＿＿")
 
     # 2. 編號連號、不重號
     nums = [int(n) for n, in [(m.group(1),) for m in BLANK.finditer(S)]]
